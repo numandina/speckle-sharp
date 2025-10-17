@@ -446,30 +446,8 @@ namespace Objects.Converter.Revit
 
 
 
-    // --- REPLACE YOUR ApplyRotationAndOffset WITH THIS (rotation disabled) ---
-    private void ApplyRotationAndOffset(Autodesk.Revit.DB.FamilyInstance fi, Speckle.Core.Models.Base sc)
-    {
-      // ROTATION: disabled on purpose so you can verify position only
-      // (do not rotate even if rotationDeg/rotationRad exists)
 
-      // OFFSET: use parameter if available; otherwise move in Z
-      if (TryGetNumber(sc, "offsetFromHost", out var offFeet) || TryGetNumber(sc, "hostOffset", out offFeet))
-      {
-        var p =
-            fi.LookupParameter("Offset from Host")
-         ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
-         ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM);
 
-        if (p != null && !p.IsReadOnly)
-        {
-          p.Set(offFeet);
-        }
-        else if (Math.Abs(offFeet) > 1e-9)
-        {
-          Autodesk.Revit.DB.ElementTransformUtils.MoveElement(Doc, fi.Id, new Autodesk.Revit.DB.XYZ(0, 0, offFeet));
-        }
-      }
-    }
 
 
 
@@ -507,26 +485,97 @@ namespace Objects.Converter.Revit
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-    // safe helper used above
-    private static void TrySetTextParam(Element el, string name, string? val)
+    // Keep your existing helpers: ProjectToPlane, AngleSignedAboutAxis, NormalizeAngle, TryGetNumber.
+    // Replace ONLY this method.
+    private void ApplyRotationAndOffset(Autodesk.Revit.DB.FamilyInstance fi, Speckle.Core.Models.Base sc)
     {
+      return;
+      // --- freeze current position ---
+      var lp = fi.Location as Autodesk.Revit.DB.LocationPoint;
+      var pre = lp?.Point ?? fi.GetTransform().Origin;
+
+      // --- target angle (rad preferred, then deg) ---
+      double target = 0.0;
+      bool hasTarget =
+          TryGetNumber(sc, "rotationRad", out target)
+       || (TryGetNumber(sc, "rotationDeg", out var deg) && ((target = deg * Math.PI / 180.0) == target));
+
+      // --- axis and in-plane reference (host face if available) ---
+      Autodesk.Revit.DB.XYZ axisDir = Autodesk.Revit.DB.XYZ.BasisZ;
+      Autodesk.Revit.DB.XYZ refX = Autodesk.Revit.DB.XYZ.BasisX;
       try
       {
-        var p = el.LookupParameter(name);
-        if (p != null && !p.IsReadOnly) p.Set(val ?? "");
+        var hostRef = fi.HostFace;
+        if (hostRef != null)
+        {
+          var hostEl = Doc.GetElement(hostRef.ElementId);
+          if (hostEl?.GetGeometryObjectFromReference(hostRef) is Autodesk.Revit.DB.PlanarFace pf)
+          {
+            axisDir = pf.FaceNormal;
+            refX = pf.XVector;
+          }
+        }
       }
-      catch { }
+      catch { /* fallback stays Z/X */ }
+
+      // --- rotate by delta only (about axis through insertion point) ---
+      if (hasTarget)
+      {
+        var cur = AngleSignedAboutAxis(ProjectToPlane(refX, axisDir), ProjectToPlane(fi.HandOrientation, axisDir), axisDir);
+        var delta = NormalizeAngle(target - cur);
+        if (Math.Abs(delta) > 1e-9)
+        {
+          var axis = Autodesk.Revit.DB.Line.CreateBound(pre, pre + axisDir);
+          Autodesk.Revit.DB.ElementTransformUtils.RotateElement(Doc, fi.Id, axis, delta);
+        }
+      }
+
+      // --- restore any drift introduced by rotation ---
+      var post = (fi.Location as Autodesk.Revit.DB.LocationPoint)?.Point ?? fi.GetTransform().Origin;
+      var drift = pre - post;
+      if (drift.GetLength() > 1e-9)
+        Autodesk.Revit.DB.ElementTransformUtils.MoveElement(Doc, fi.Id, drift);
+
+      // --- apply offset last (same as before) ---
+      if (TryGetNumber(sc, "offsetFromHost", out var offFeet) || TryGetNumber(sc, "hostOffset", out offFeet))
+      {
+        var p =
+            fi.LookupParameter("Offset from Host")
+         ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
+         ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM);
+
+        if (p != null && !p.IsReadOnly) p.Set(offFeet);
+        else if (Math.Abs(offFeet) > 1e-9)
+          Autodesk.Revit.DB.ElementTransformUtils.MoveElement(Doc, fi.Id, new Autodesk.Revit.DB.XYZ(0, 0, offFeet));
+      }
+    }
+
+
+
+
+    // ---- small helpers (same class) ----
+    private static Autodesk.Revit.DB.XYZ ProjectToPlane(Autodesk.Revit.DB.XYZ v, Autodesk.Revit.DB.XYZ n)
+    {
+      var nn = n.Normalize();
+      return v - (v.DotProduct(nn)) * nn;
+    }
+
+    private static double AngleSignedAboutAxis(Autodesk.Revit.DB.XYZ a, Autodesk.Revit.DB.XYZ b, Autodesk.Revit.DB.XYZ axis)
+    {
+      var an = a.Normalize();
+      var bn = b.Normalize();
+      double cos = Math.Max(-1.0, Math.Min(1.0, an.DotProduct(bn)));
+      double ang = Math.Acos(cos);
+      double sign = axis.Normalize().DotProduct(an.CrossProduct(bn));
+      return sign < 0 ? -ang : ang;
+    }
+
+    private static double NormalizeAngle(double a)
+    {
+      const double TAU = Math.PI * 2.0;
+      while (a > Math.PI) a -= TAU;
+      while (a < -Math.PI) a += TAU;
+      return a;
     }
 
 
@@ -534,6 +583,64 @@ namespace Objects.Converter.Revit
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // --- helpers used above (drop these anywhere in the same partial class) ---
+    private static bool TryGetNumberParam(Autodesk.Revit.DB.Element el, string name, out double val)
+    {
+      val = 0;
+      try
+      {
+        var p = el.LookupParameter(name);
+        if (p == null) return false;
+
+        switch (p.StorageType)
+        {
+          case Autodesk.Revit.DB.StorageType.Double: val = p.AsDouble(); return true;
+          case Autodesk.Revit.DB.StorageType.Integer: val = p.AsInteger(); return true;
+          case Autodesk.Revit.DB.StorageType.String:
+            return double.TryParse(p.AsString(), System.Globalization.NumberStyles.Float,
+                      System.Globalization.CultureInfo.InvariantCulture, out val);
+          default: return false;
+        }
+      }
+      catch { return false; }
+    }
+
+    private static void SetNumberOrTextParam(Autodesk.Revit.DB.Element el, string name, double val)
+    {
+      try
+      {
+        var p = el.LookupParameter(name);
+        if (p == null || p.IsReadOnly) return;
+
+        if (p.StorageType == Autodesk.Revit.DB.StorageType.Double) p.Set(val);
+        else if (p.StorageType == Autodesk.Revit.DB.StorageType.Integer) p.Set((int)Math.Round(val));
+        else p.Set(val.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      }
+      catch { /* ignore */ }
+    }
 
 
 
