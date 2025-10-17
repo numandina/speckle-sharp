@@ -150,102 +150,73 @@ namespace Objects.Converter.Revit
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // Revit/ConvertStructuralConnection.cs  (drop-in)
+    // --- REPLACE YOUR METHOD WITH THIS ---
     private ApplicationObject StructuralConnectionToNative(Objects.BuiltElements.Revit.StructuralConnection sc)
     {
       var appObj = new ApplicationObject(sc.id, sc.speckle_type) { applicationId = sc.applicationId };
-      SC_LOG($"[SC][IN{(_isFlushingSC ? "|FLUSH" : "")}] appId={sc.applicationId} typeId='{sc.typeId}' typeName='{sc.typeName}' hostsIn={sc.connectedElementUniqueIds?.Count ?? 0}");
 
-      // ---- 1) Resolve host(s) strictly by applicationId (Unity flow) ----
-      var memberIds = new List<ElementId>();
+      // 1) Resolve hosts by applicationId
+      var memberIds = new List<Autodesk.Revit.DB.ElementId>();
       foreach (var key in sc.connectedElementUniqueIds ?? Enumerable.Empty<string>())
       {
         var ids = FindByAppId(key);
         if (ids.Count > 0) memberIds.AddRange(ids);
-        else SC_LOG($"  [SC][RESOLVE] appId '{key}' -> MISS");
       }
-      SC_LOG($"  [SC] resolved {memberIds.Count} member(s) total");
 
       if (memberIds.Count < 1)
       {
         if (!_isFlushingSC)
         {
           var pendKey = sc.applicationId ?? sc.id ?? Guid.NewGuid().ToString("N");
-          if (_pendingSCKeys.Add(pendKey))
-          {
-            _pendingSC.Add(sc);
-            SC_LOG("[SC][DEFER] <1 host. Will retry after hosts are received.");
-          }
+          if (_pendingSCKeys.Add(pendKey)) _pendingSC.Add(sc);
           appObj.Update(status: ApplicationObject.State.Skipped, logItem: "Deferred: waiting for host.");
         }
         else
         {
-          SC_LOG("[SC][MISS][FLUSH] still missing host after flush.");
           appObj.Update(status: ApplicationObject.State.Skipped, logItem: "Missing host after flush.");
         }
         return appObj;
       }
 
-      // ---- 2) Pick a Structural Connections FamilySymbol by id or name (your case) ----
-      FamilySymbol symbol = null;
+      // 2) Pick a Structural Connections FamilySymbol
+      Autodesk.Revit.DB.FamilySymbol symbol = null;
 
       if (int.TryParse(sc.typeId, out var typeInt))
       {
-        if (Doc.GetElement(new ElementId(typeInt)) is FamilySymbol fsById
-            && fsById.Category != null
-            && (BuiltInCategory)fsById.Category.Id.IntegerValue == BuiltInCategory.OST_StructConnections)
+        var fsById = Doc.GetElement(new Autodesk.Revit.DB.ElementId(typeInt)) as Autodesk.Revit.DB.FamilySymbol;
+        if (fsById?.Category != null &&
+            (Autodesk.Revit.DB.BuiltInCategory)fsById.Category.Id.IntegerValue == Autodesk.Revit.DB.BuiltInCategory.OST_StructConnections)
           symbol = fsById;
       }
 
       if (symbol == null && !string.IsNullOrWhiteSpace(sc.typeName))
       {
-        symbol = new FilteredElementCollector(Doc)
-          .OfClass(typeof(FamilySymbol))
-          .Cast<FamilySymbol>()
+        symbol = new Autodesk.Revit.DB.FilteredElementCollector(Doc)
+          .OfClass(typeof(Autodesk.Revit.DB.FamilySymbol))
+          .Cast<Autodesk.Revit.DB.FamilySymbol>()
           .FirstOrDefault(s =>
             s.Category != null
-            && (BuiltInCategory)s.Category.Id.IntegerValue == BuiltInCategory.OST_StructConnections
+            && (Autodesk.Revit.DB.BuiltInCategory)s.Category.Id.IntegerValue == Autodesk.Revit.DB.BuiltInCategory.OST_StructConnections
             && s.Name.Equals(sc.typeName, StringComparison.OrdinalIgnoreCase));
       }
 
       if (symbol == null)
       {
-        symbol = new FilteredElementCollector(Doc)
-          .OfClass(typeof(FamilySymbol))
-          .Cast<FamilySymbol>()
-          .FirstOrDefault(s => s.Category != null &&
-                               (BuiltInCategory)s.Category.Id.IntegerValue == BuiltInCategory.OST_StructConnections);
+        symbol = new Autodesk.Revit.DB.FilteredElementCollector(Doc)
+          .OfClass(typeof(Autodesk.Revit.DB.FamilySymbol))
+          .Cast<Autodesk.Revit.DB.FamilySymbol>()
+          .FirstOrDefault(s =>
+            s.Category != null
+            && (Autodesk.Revit.DB.BuiltInCategory)s.Category.Id.IntegerValue == Autodesk.Revit.DB.BuiltInCategory.OST_StructConnections);
       }
 
       if (symbol == null)
       {
-        SC_LOG("[SC][SKIP] no Structural Connections FamilySymbol available.");
         appObj.Update(status: ApplicationObject.State.Skipped, logItem: "No Structural Connections family type found.");
         return appObj;
       }
 
-
-
-
-
-
-      // ---- 3) Compute a placement point on host A (projected to face) ----
+      // 3) Compute placement point from first host (optionally midpoint of first two)
       var hostA = Doc.GetElement(memberIds[0]);
 
       Autodesk.Revit.DB.XYZ GetCenter(Autodesk.Revit.DB.Element e)
@@ -257,89 +228,53 @@ namespace Objects.Converter.Revit
         return Autodesk.Revit.DB.XYZ.Zero;
       }
 
-      // prefer midpoint between A & B (or their curve intersection) if B exists
-      Autodesk.Revit.DB.XYZ desired = GetCenter(hostA);
+      var desired = GetCenter(hostA);
       if (memberIds.Count >= 2)
       {
-        var mid = MidpointOfElements(memberIds[0], memberIds[1]); // you already have this helper below
+        var mid = MidpointOfElements(memberIds[0], memberIds[1]);
         if (mid != null) desired = mid;
       }
 
-      // project that point to a face on host A (so it’s actually on the host surface)
-      Autodesk.Revit.DB.XYZ faceNormal;
-      var faceRef = FindNearestPlanarFaceReference(hostA, desired, out faceNormal);
+      // Precompute faceRef/normal ONCE and reuse (prevents shadowing errors)
+      Autodesk.Revit.DB.XYZ faceNormalOuter;
+      var faceRefOuter = FindNearestPlanarFaceReference(hostA, desired, out faceNormalOuter);
 
-      Autodesk.Revit.DB.XYZ pt = desired;
-      if (faceRef != null)
+      var pt = desired;
+      if (faceRefOuter != null)
       {
-        var pf = hostA.GetGeometryObjectFromReference(faceRef) as PlanarFace;
-        if (pf != null)
-        {
-          var proj = pf.Project(desired);
-          if (proj != null) pt = proj.XYZPoint;
-        }
+        var pf = hostA.GetGeometryObjectFromReference(faceRefOuter) as Autodesk.Revit.DB.PlanarFace;
+        var proj = pf?.Project(desired);
+        if (proj != null) pt = proj.XYZPoint;
       }
 
+      // Direction in plane for face-based placement
+      var refDirOuter = (Math.Abs(faceNormalOuter.DotProduct(Autodesk.Revit.DB.XYZ.BasisZ)) > 0.9)
+          ? Autodesk.Revit.DB.XYZ.BasisX
+          : Autodesk.Revit.DB.XYZ.BasisZ;
 
+      // 4) Closest level to point
+      var level = ClosestLevelToPoint(pt);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-      // Find a level (closest to point)
-      Autodesk.Revit.DB.Level level = null;
-      try
-      {
-        level = new FilteredElementCollector(Doc)
-          .OfClass(typeof(Autodesk.Revit.DB.Level))
-          .Cast<Autodesk.Revit.DB.Level>()
-          .OrderBy(l => Math.Abs((l.Elevation) - pt.Z))
-          .FirstOrDefault();
-      }
-      catch { }
-
-      // ---- 4) Find existing instance by Speckle.ApplicationId (update in-place if present) ----
+      // 5) Existing instance by Speckle.ApplicationId
       Autodesk.Revit.DB.FamilyInstance existing = null;
-      try
+      if (!string.IsNullOrWhiteSpace(sc.applicationId))
       {
-        if (!string.IsNullOrWhiteSpace(sc.applicationId))
-        {
-          existing = new FilteredElementCollector(Doc)
-            .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance))
-            .Cast<Autodesk.Revit.DB.FamilyInstance>()
-            .FirstOrDefault(fi =>
-            {
-              var p = fi.LookupParameter("Speckle.ApplicationId");
-              return p != null && string.Equals(p.AsString(), sc.applicationId, StringComparison.OrdinalIgnoreCase);
-            });
-        }
+        existing = new Autodesk.Revit.DB.FilteredElementCollector(Doc)
+          .OfClass(typeof(Autodesk.Revit.DB.FamilyInstance))
+          .Cast<Autodesk.Revit.DB.FamilyInstance>()
+          .FirstOrDefault(fi =>
+          {
+            var p = fi.LookupParameter("Speckle.ApplicationId");
+            return p != null && string.Equals(p.AsString(), sc.applicationId, StringComparison.OrdinalIgnoreCase);
+          });
       }
-      catch { /* ignore */ }
 
-      // Ensure symbol is active
+      // Ensure symbol active (works either inside or outside a tx)
       if (!symbol.IsActive)
       {
-        using var txAct = new Transaction(Doc, "Activate SC family symbol");
-        txAct.Start();
-        symbol.Activate();
-        txAct.Commit();
+        if (Doc.IsModifiable) symbol.Activate();
+        else { using var txAct = new Autodesk.Revit.DB.Transaction(Doc, "Activate SC family symbol"); txAct.Start(); symbol.Activate(); txAct.Commit(); }
       }
-
-      // ---- 5) Create or Update (safe with or without an outer transaction) ----
-      bool useSub = Doc.IsModifiable;
-      string txName = (existing == null) ? "Speckle - Place SC Family" : "Speckle - Update SC Family";
-
-      // compute and cache the primary host once
-      var primaryHostEl = Doc.GetElement(memberIds[0]);
 
       void AfterCreateOrUpdate(Autodesk.Revit.DB.FamilyInstance fiLocal)
       {
@@ -350,53 +285,37 @@ namespace Objects.Converter.Revit
         }
         catch { }
 
-        try
-        {
-          var joined = string.Join(";", sc.connectedElementUniqueIds ?? Enumerable.Empty<string>());
-          foreach (var name in new[] { "Speckle.HostIds", "HostIds", "SC.HostA", "SC.HostB" })
-          {
-            var p = fiLocal.LookupParameter(name);
-            if (p != null && !p.IsReadOnly) { p.Set(joined); break; }
-          }
-        }
-        catch { }
-
-        ApplyRotationAndOffset(fiLocal, sc);
+        TryStampHostIds(fiLocal, sc.connectedElementUniqueIds);
+        ApplyRotationAndOffset(fiLocal, sc); // rotation is forced to 0 inside for this test
       }
+
+      bool useSub = Doc.IsModifiable;
+      string txName = (existing == null) ? "Speckle - Place SC Family" : "Speckle - Update SC Family";
+      var primaryHostEl = hostA;
 
       if (useSub)
       {
-        using var st = new SubTransaction(Doc);
+        using var st = new Autodesk.Revit.DB.SubTransaction(Doc);
         st.Start();
 
-        Autodesk.Revit.DB.FamilyInstance fi = existing; // single variable
+        var fi = existing;
 
         if (fi == null)
         {
-          // 1) Try element-hosted overload
+          // element-hosted
           try
           {
-            fi = Doc.Create.NewFamilyInstance(
-              pt, symbol, primaryHostEl, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+            fi = Doc.Create.NewFamilyInstance(pt, symbol, primaryHostEl, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
           }
           catch { /* try face-based next */ }
 
-          // 2) Face-based overload (Reference, point, refDirection, symbol)
-          if (fi == null)
+          // face-based (reuse precomputed faceRefOuter/refDirOuter)
+          if (fi == null && faceRefOuter != null)
           {
-            Autodesk.Revit.DB.XYZ faceNormal;
-            var faceRef = FindNearestPlanarFaceReference(primaryHostEl, pt, out faceNormal);
-            if (faceRef != null)
-            {
-              var refDir = (Math.Abs(faceNormal.DotProduct(Autodesk.Revit.DB.XYZ.BasisZ)) > 0.9)
-                ? Autodesk.Revit.DB.XYZ.BasisX
-                : Autodesk.Revit.DB.XYZ.BasisZ;
-
-              fi = Doc.Create.NewFamilyInstance(faceRef, pt, refDir, symbol);
-            }
+            fi = Doc.Create.NewFamilyInstance(faceRefOuter, pt, refDirOuter, symbol);
           }
 
-          // 3) Fallback: free/level-based placement
+          // free/level fallback
           if (fi == null)
           {
             fi = (level != null)
@@ -410,8 +329,7 @@ namespace Objects.Converter.Revit
         }
         else
         {
-          if (fi.Symbol?.Id != symbol.Id)
-            fi.ChangeTypeId(symbol.Id);
+          if (fi.Symbol?.Id != symbol.Id) fi.ChangeTypeId(symbol.Id);
 
           if (fi.Location is Autodesk.Revit.DB.LocationPoint lp)
           {
@@ -429,37 +347,27 @@ namespace Objects.Converter.Revit
       }
       else
       {
-        using var tx = new Transaction(Doc, txName);
+        using var tx = new Autodesk.Revit.DB.Transaction(Doc, txName);
         tx.Start();
 
-        Autodesk.Revit.DB.FamilyInstance fi = existing; // single variable
+        var fi = existing;
 
         if (fi == null)
         {
-          // 1) Try element-hosted overload
+          // element-hosted
           try
           {
-            fi = Doc.Create.NewFamilyInstance(
-              pt, symbol, primaryHostEl, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+            fi = Doc.Create.NewFamilyInstance(pt, symbol, primaryHostEl, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
           }
           catch { /* try face-based next */ }
 
-          // 2) Face-based overload
-          if (fi == null)
+          // face-based (reuse precomputed faceRefOuter/refDirOuter)
+          if (fi == null && faceRefOuter != null)
           {
-            Autodesk.Revit.DB.XYZ faceNormal;
-            var faceRef = FindNearestPlanarFaceReference(primaryHostEl, pt, out faceNormal);
-            if (faceRef != null)
-            {
-              var refDir = (Math.Abs(faceNormal.DotProduct(Autodesk.Revit.DB.XYZ.BasisZ)) > 0.9)
-                ? Autodesk.Revit.DB.XYZ.BasisX
-                : Autodesk.Revit.DB.XYZ.BasisZ;
-
-              fi = Doc.Create.NewFamilyInstance(faceRef, pt, refDir, symbol);
-            }
+            fi = Doc.Create.NewFamilyInstance(faceRefOuter, pt, refDirOuter, symbol);
           }
 
-          // 3) Fallback free/level-based
+          // free/level fallback
           if (fi == null)
           {
             fi = (level != null)
@@ -473,8 +381,7 @@ namespace Objects.Converter.Revit
         }
         else
         {
-          if (fi.Symbol?.Id != symbol.Id)
-            fi.ChangeTypeId(symbol.Id);
+          if (fi.Symbol?.Id != symbol.Id) fi.ChangeTypeId(symbol.Id);
 
           if (fi.Location is Autodesk.Revit.DB.LocationPoint lp)
           {
@@ -490,8 +397,12 @@ namespace Objects.Converter.Revit
 
         return appObj;
       }
-
     }
+
+
+
+
+
 
 
 
@@ -531,27 +442,20 @@ namespace Objects.Converter.Revit
 
 
 
-    // --- helper: apply rotation (deg/rad) and offset (feet) ---
-    // Reads "rotationDeg" (degrees) or "rotationRad" (radians) and "offsetFromHost" (feet).
+
+
+
+
+    // --- REPLACE YOUR ApplyRotationAndOffset WITH THIS (rotation disabled) ---
     private void ApplyRotationAndOffset(Autodesk.Revit.DB.FamilyInstance fi, Speckle.Core.Models.Base sc)
     {
-      // rotation (about +Z through instance location)
-      double rot = 0.0;
-      if (TryGetNumber(sc, "rotationRad", out var rr)) rot = rr;
-      else if (TryGetNumber(sc, "rotationDeg", out var rd)) rot = rd * Math.PI / 180.0;
+      // ROTATION: disabled on purpose so you can verify position only
+      // (do not rotate even if rotationDeg/rotationRad exists)
 
-      if (Math.Abs(rot) > 1e-9)
-      {
-        var lp = fi.Location as Autodesk.Revit.DB.LocationPoint;
-        var origin = lp?.Point ?? fi.GetTransform().Origin;
-        var axis = Autodesk.Revit.DB.Line.CreateBound(origin, origin + Autodesk.Revit.DB.XYZ.BasisZ);
-        Autodesk.Revit.DB.ElementTransformUtils.RotateElement(Doc, fi.Id, axis, rot);
-      }
-
-      // offset: try a parameter first; otherwise translate along global Z
+      // OFFSET: use parameter if available; otherwise move in Z
       if (TryGetNumber(sc, "offsetFromHost", out var offFeet) || TryGetNumber(sc, "hostOffset", out offFeet))
       {
-        Autodesk.Revit.DB.Parameter p =
+        var p =
             fi.LookupParameter("Offset from Host")
          ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
          ?? fi.get_Parameter(Autodesk.Revit.DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM);
@@ -562,12 +466,23 @@ namespace Objects.Converter.Revit
         }
         else if (Math.Abs(offFeet) > 1e-9)
         {
-          // translate directly as a fallback
-          Autodesk.Revit.DB.ElementTransformUtils.MoveElement(Doc, fi.Id,
-            new Autodesk.Revit.DB.XYZ(0, 0, offFeet));
+          Autodesk.Revit.DB.ElementTransformUtils.MoveElement(Doc, fi.Id, new Autodesk.Revit.DB.XYZ(0, 0, offFeet));
         }
       }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     // robust read of number-like dynamic props
     private static bool TryGetNumber(Speckle.Core.Models.Base b, string name, out double val)
