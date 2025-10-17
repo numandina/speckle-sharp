@@ -97,6 +97,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)RevitElementTypeUtils.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)RevitVersionHelper.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Revit\ConnectionPair.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)revit\ConvertStructuralConnection.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Revit\FamilyLoadOptions.cs" />
   </ItemGroup>
 </Project>

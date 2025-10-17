@@ -1,3 +1,4 @@
+
 #nullable enable
 using System;
 using System.Collections.Generic;
@@ -54,6 +55,15 @@ public partial class ConverterRevit : ISpeckleConverter
 
   private const double TOLERANCE = 0.0164042; // 5mm in ft
 
+
+
+
+  private readonly List<Objects.BuiltElements.Revit.StructuralConnection> _pendingSC = new();
+  private readonly HashSet<string> _pendingSCKeys = new();
+  private bool _isFlushingSC = false;
+
+
+
   public Document Doc { get; private set; }
 
   /// <summary>
@@ -108,6 +118,17 @@ public partial class ConverterRevit : ISpeckleConverter
   {
     var ver = System.Reflection.Assembly.GetAssembly(typeof(ConverterRevit)).GetName().Version;
     Report.Log($"Using converter: {Name} v{ver}");
+
+    try
+    {
+      var objAsm = typeof(Objects.Geometry.Mesh).Assembly; // from Objects.dll
+      Report.Log($"[DEBUG] Objects.dll loaded from: {objAsm.Location} (v{objAsm.GetName().Version})");
+    }
+    catch (System.Exception ex)
+    {
+      Report.Log($"[DEBUG] Could not resolve Objects.dll path: {ex.Message}");
+    }
+
   }
 
   private IRevitDocumentAggregateCache? revitDocumentAggregateCache;
@@ -207,9 +228,57 @@ public partial class ConverterRevit : ISpeckleConverter
   {
     Settings = settings as Dictionary<string, string>;
   }
+  private static bool __bootPopupShown = false;
 
   public Base ConvertToSpeckle(object @object)
   {
+
+    // ---- BOOT PROBE: prints once per send session ----
+    try
+    {
+      if (!__bootPopupShown)
+      {
+        __bootPopupShown = true;
+
+        var objAsm = typeof(Objects.Geometry.Mesh).Assembly;
+        var convAsm = typeof(ConverterRevit).Assembly;
+        var msg =
+          "[SPECKLE DEBUG]\n" +
+          $"Objects.dll:   {objAsm.Location}\n" +
+          $"Objects ver:   {objAsm.GetName().Version}\n" +
+          $"Converter dll: {convAsm.Location}\n" +
+          $"Converter ver: {convAsm.GetName().Version}";
+
+        // 1) Try a Revit TaskDialog via reflection (no compile-time dependency)
+        try
+        {
+          var tdType = Type.GetType("Autodesk.Revit.UI.TaskDialog, RevitAPIUI");
+          var show = tdType?.GetMethod("Show", new[] { typeof(string), typeof(string) });
+          show?.Invoke(null, new object[] { "Speckle Converter Debug", msg });
+        }
+        catch { /* swallow */ }
+
+        // 2) Also file-log (so we have breadcrumbs even if UI is suppressed)
+        try
+        {
+          var logPath = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Speckle", "Logs", "converter-boot.log"
+          );
+          System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(logPath)!);
+          System.IO.File.AppendAllText(logPath, msg + Environment.NewLine);
+        }
+        catch { /* swallow */ }
+
+        // 3) And write to Speckle panel
+        try { Report.Log(msg); } catch { /* swallow */ }
+      }
+    }
+    catch { /* ignore */ }
+
+
+
+
     Base returnObject = null;
     List<string> notes = new();
     string id = @object is Element element ? element.UniqueId : string.Empty;
@@ -226,8 +295,20 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = DirectShapeToSpeckle(o);
         break;
       case DB.FamilyInstance o:
-        returnObject = FamilyInstanceToSpeckle(o, out notes);
-        break;
+        {
+          // SPECIAL CASE: Structural Connections families (category = OST_StructConnections)
+          var cat = o.Category;
+          if (cat != null && (DB.BuiltInCategory)cat.Id.IntegerValue == DB.BuiltInCategory.OST_StructConnections)
+          {
+            Report.Log($"[SC-HIT-FI] Treating FamilyInstance {o.UniqueId} (category OST_StructConnections) as StructuralConnection.");
+            returnObject = FamilyInstanceStructuralConnectionToSpeckle(o);
+            break;
+          }
+
+          // default family path
+          returnObject = FamilyInstanceToSpeckle(o, out notes);
+          break;
+        }
       case DB.Floor o:
         returnObject = FloorToSpeckle(o, out notes);
         break;
@@ -358,6 +439,7 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = BoundaryConditionsToSpeckle(o);
         break;
       case DB.Structure.StructuralConnectionHandler o:
+        Report.Log($"[SC-HIT] Converting StructuralConnectionHandler: {o.UniqueId} ({o.GetType().FullName})");
         returnObject = StructuralConnectionHandlerToSpeckle(o);
         break;
       case DB.CombinableElement o:
@@ -388,6 +470,12 @@ public partial class ConverterRevit : ISpeckleConverter
       default:
         // if we don't have a direct conversion, still try to send this element as a generic RevitElement
         var el = @object as Element;
+        if (el != null && el.Category != null &&
+            (BuiltInCategory)el.Category.Id.IntegerValue == BuiltInCategory.OST_StructConnections)
+        {
+          Report.Log($"[SC-MISS] Fell through to RevitInstance for {el.UniqueId} (category = OST_StructConnections, class = {el.GetType().FullName})");
+        }
+
         if (el.IsElementSupported())
         {
           returnObject = RevitElementToSpeckle(el, out notes);
@@ -419,6 +507,29 @@ public partial class ConverterRevit : ISpeckleConverter
 
     return returnObject;
   }
+
+  private Base FamilyInstanceStructuralConnectionToSpeckle(DB.FamilyInstance fi)
+  {
+    // Build a minimal StructuralConnection Speckle object from a FamilyInstance in the Structural Connections category.
+    var sc = new Objects.BuiltElements.Revit.StructuralConnection
+    {
+      applicationId = fi.UniqueId,
+      typeId = fi.Symbol?.Id.IntegerValue.ToString(),
+      typeName = fi.Symbol?.Name
+    };
+
+    // Best-effort: harvest a mesh for viewers/Unity
+    try { sc.displayValue = GetElementDisplayValue(fi); } catch { }
+
+    // Keep Revit params/ids for round-tripping context
+    try { GetAllRevitParamsAndIds(sc, fi); } catch { }
+
+    // Debug probe so you can see it in the Speckle viewer
+    sc["probe"] = "SC from FamilyInstance";
+
+    return sc;
+  }
+
 
   private string GetElemInfo(object o)
   {
@@ -475,6 +586,47 @@ public partial class ConverterRevit : ISpeckleConverter
     return speckleSchema;
   }
 
+  // helper: find elements by our invented appId
+  private IReadOnlyList<ElementId> FindByAppId(string appId)
+  {
+    if (string.IsNullOrWhiteSpace(appId)) return Array.Empty<ElementId>();
+
+    if (_appIdIndex.TryGetValue(appId, out var ids) && ids != null && ids.Count > 0)
+    {
+      SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> [{string.Join(",", ids.Select(i => i.IntegerValue))}] (INDEX)");
+      return ids;
+    }
+
+    // fallback only to PARAM lookup (still by applicationId)
+    try
+    {
+      var el = new FilteredElementCollector(Doc)
+        .WhereElementIsNotElementType()
+        .Cast<Element>()
+        .FirstOrDefault(e =>
+        {
+          var p = e.LookupParameter("Speckle.ApplicationId");
+          return p != null && string.Equals(p.AsString(), appId, StringComparison.OrdinalIgnoreCase);
+        });
+
+      if (el != null)
+      {
+        SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> {el.Id.IntegerValue} (PARAM)");
+        // also push it into the index so next time it's instant
+        if (!_appIdIndex.TryGetValue(appId, out var list))
+          _appIdIndex[appId] = list = new List<ElementId>();
+        if (!list.Contains(el.Id)) list.Add(el.Id);
+        return new[] { el.Id };
+      }
+    }
+    catch { /* ignore */ }
+
+    SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> MISS");
+    return Array.Empty<ElementId>();
+  }
+
+
+  // ensure this is called after *every* successful conversion
   public object ConvertToNative(Base @base)
   {
     var nativeObject = ConvertToNativeObject(@base);
@@ -482,13 +634,16 @@ public partial class ConverterRevit : ISpeckleConverter
     switch (nativeObject)
     {
       case ApplicationObject appObject:
-        if (appObject.Converted.Cast<Element>().ToList() is List<Element> typedList && typedList.Count >= 1)
+        if (appObject.Converted.Cast<Element>().ToList() is List<Element> elems && elems.Count >= 1)
         {
-          receivedObjectsCache?.AddConvertedObjects(@base, typedList);
+          receivedObjectsCache?.AddConvertedObjects(@base, elems);
+          foreach (var el in elems) IndexAppIdFor(@base, el); // <— important
         }
         break;
-      case Element element:
-        receivedObjectsCache?.AddConvertedObjects(@base, new List<Element> { element });
+
+      case Element single:
+        receivedObjectsCache?.AddConvertedObjects(@base, new List<Element> { single });
+        IndexAppIdFor(@base, single); // <— important
         break;
     }
 
@@ -694,6 +849,9 @@ public partial class ConverterRevit : ISpeckleConverter
       case BE.View3D o:
         return ViewToNative(o);
 
+      case BER.StructuralConnection o:
+        return StructuralConnectionToNative(o);
+
       case RevitMEPFamilyInstance o:
         return FittingOrMEPInstanceToNative(o);
 
@@ -772,7 +930,83 @@ public partial class ConverterRevit : ISpeckleConverter
 
   public List<Base> ConvertToSpeckle(List<object> objects) => objects.Select(ConvertToSpeckle).ToList();
 
-  public List<object> ConvertToNative(List<Base> objects) => objects.Select(ConvertToNative).ToList();
+  public List<object> ConvertToNative(List<Base> objects)
+  {
+    var results = new List<object>(objects.Count);
+
+    foreach (var b in objects)
+      results.Add(ConvertToNative(b)); // first pass
+
+    // second pass for deferred StructuralConnections
+    if (_pendingSC.Count > 0)
+    {
+      _isFlushingSC = true;
+      try
+      {
+        var pendingKeys = _pendingSC
+          .Select(x => string.Join("|", x.connectedElementUniqueIds ?? Enumerable.Empty<string>()))
+          .ToList();
+
+        SC_LOG($"[SC][FLUSH][BEGIN] pending={_pendingSC.Count}");
+        SC_LOG($"[SC][FLUSH] pending host-keys:\n  - {string.Join("\n  - ", pendingKeys)}");
+        SC_LOG($"[SC][FLUSH] index keys:\n  - {string.Join("\n  - ", _appIdIndex.Keys)}");
+
+        var pendings = _pendingSC.ToList(); // snapshot
+        _pendingSC.Clear();
+        _pendingSCKeys.Clear();
+
+        int processed = 0;
+        foreach (var sc in pendings)
+        {
+          SC_LOG($"[SC][FLUSH][TRY] appId='{sc.applicationId}' hosts={string.Join(",", sc.connectedElementUniqueIds ?? Enumerable.Empty<string>())}");
+          var res = ConvertToNative(sc);   // re-run with hosts now in the model
+          results.Add(res);
+          processed++;
+        }
+
+        SC_LOG($"[SC][FLUSH][END] processed={processed}");
+      }
+      finally
+      {
+        _isFlushingSC = false;
+      }
+    }
+    else
+    {
+      SC_LOG("[SC][FLUSH] skipped (no pending)");
+    }
+
+    return results;
+  }
+
+
+  private T WithWriteTx<T>(string name, Func<T> body)
+  {
+    if (Doc.IsModifiable)
+    {
+      SC_LOG($"[TX] SubTransaction: {name}");
+      using (var st = new SubTransaction(Doc))
+      {
+        st.Start();
+        var result = body();
+        st.Commit();
+        return result;
+      }
+    }
+    else
+    {
+      SC_LOG($"[TX] Transaction: {name}");
+      using (var tx = new Transaction(Doc, name))
+      {
+        tx.Start();
+        var result = body();
+        tx.Commit();
+        return result;
+      }
+    }
+  }
+
+
 
   public bool CanConvertToSpeckle(object @object)
   {
@@ -816,6 +1050,8 @@ public partial class ConverterRevit : ISpeckleConverter
       DB.ReferencePoint _ => true,
       DB.FabricationPart _ => true,
       DB.CombinableElement _ => true,
+      DB.Structure.StructuralConnectionHandler _ => true,
+
 
 #if (REVIT2024)
       DB.Toposolid _ => true,
@@ -832,6 +1068,110 @@ public partial class ConverterRevit : ISpeckleConverter
       _ => (@object as Element).IsElementSupported()
     };
   }
+
+
+  // Map of our invented appIds -> created Revit ElementIds in this receive pass
+  private readonly Dictionary<string, List<ElementId>> _appIdIndex =
+    new Dictionary<string, List<ElementId>>(StringComparer.OrdinalIgnoreCase);
+
+  private void IndexConverted(string appId, IEnumerable<Element> elems)
+  {
+    if (string.IsNullOrWhiteSpace(appId) || elems == null) return;
+    var ids = elems.Where(e => e != null).Select(e => e.Id).ToList();
+    if (ids.Count == 0) return;
+
+    _appIdIndex[appId] = ids;
+    SC_LOG($"[IDX][ADD] {appId} -> [{string.Join(",", ids.Select(i => i.IntegerValue))}]");
+  }
+
+
+  // add/replace this helper
+  private void IndexAppIdFor(Base speckle, Element el)
+  {
+    var key = speckle?.applicationId ?? speckle?["applicationId"] as string;
+    if (string.IsNullOrWhiteSpace(key))
+    {
+      SC_LOG($"[IDX][SKIP] no appId for {el.Id.IntegerValue} ({el.GetType().Name})");
+      return;
+    }
+
+    // stamp the parameter so we can always find by appId later
+    try
+    {
+      var p = el.LookupParameter("Speckle.ApplicationId");
+      if (p != null && !p.IsReadOnly)
+      {
+        var prev = p.AsString();
+        if (!string.Equals(prev, key, StringComparison.OrdinalIgnoreCase))
+        {
+          p.Set(key);
+          SC_LOG($"[IDX][STAMP] {el.Id.IntegerValue} param=Speckle.ApplicationId set to '{key}' (was '{prev}')");
+        }
+      }
+    }
+    catch { /* ignore */ }
+
+    if (!_appIdIndex.TryGetValue(key, out var list))
+      _appIdIndex[key] = list = new List<ElementId>();
+
+    if (!list.Contains(el.Id)) list.Add(el.Id);
+
+    SC_LOG($"[IDX][ADD] {key} -> [{string.Join(",", list.Select(x => x.IntegerValue))}] ({el.GetType().Name})");
+    TryResolvePendingForKey(key);   // <— add this line
+
+  }
+
+
+
+  // ---- the missing helper ----
+  private void TryResolvePendingForKey(string key)
+  {
+    if (_pendingSC.Count == 0) return;
+
+    // Find pending SCs that include this key AND now have all hosts available in the index
+    var ready = new List<Objects.BuiltElements.Revit.StructuralConnection>();
+    SC_LOG($"[SC][FLUSH] starting, pending={_pendingSC.Count}, indexKeys={_appIdIndex.Count}");
+
+    foreach (var sc in _pendingSC)
+    {
+      var keys = sc.connectedElementUniqueIds ?? Enumerable.Empty<string>();
+      if (!keys.Contains(key)) continue;
+
+      bool allReady = keys.All(k =>
+        !string.IsNullOrWhiteSpace(k) &&
+        _appIdIndex.TryGetValue(k, out var ids) &&
+        ids != null && ids.Count > 0);
+
+      if (allReady) ready.Add(sc);
+    }
+
+    if (ready.Count == 0) return;
+
+    SC_LOG($"[SC][RESOLVE] key '{key}' unlocked {ready.Count} pending connection(s)");
+
+    // Remove from pending before attempting to create
+    foreach (var sc in ready)
+    {
+      var k = sc.applicationId ?? sc.id ?? Guid.NewGuid().ToString("N");
+      _pendingSC.Remove(sc);
+      _pendingSCKeys.Remove(k);
+    }
+
+    // Build them now (mark as flushing so we don't re-defer)
+    var wasFlushing = _isFlushingSC;
+    _isFlushingSC = true;
+    try
+    {
+      foreach (var sc in ready)
+        StructuralConnectionToNative(sc);
+    }
+    finally
+    {
+      _isFlushingSC = wasFlushing;
+    }
+  }
+
+
 
   public bool CanConvertToNative(Base @object)
   {
@@ -883,6 +1223,7 @@ public partial class ConverterRevit : ISpeckleConverter
       BERC.RoomBoundaryLine _ => true,
       BERC.SpaceSeparationLine _ => true,
       BE.Roof _ => true,
+      BER.StructuralConnection _ => true,
 
 #if (REVIT2024)
       RevitToposolid _ => true,
