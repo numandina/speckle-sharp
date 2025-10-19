@@ -593,7 +593,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
     if (_appIdIndex.TryGetValue(appId, out var ids) && ids != null && ids.Count > 0)
     {
-      SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> [{string.Join(",", ids.Select(i => i.IntegerValue))}] (INDEX)");
+      //SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> [{string.Join(",", ids.Select(i => i.IntegerValue))}] (INDEX)");
       return ids;
     }
 
@@ -611,7 +611,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
       if (el != null)
       {
-        SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> {el.Id.IntegerValue} (PARAM)");
+        //SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> {el.Id.IntegerValue} (PARAM)");
         // also push it into the index so next time it's instant
         if (!_appIdIndex.TryGetValue(appId, out var list))
           _appIdIndex[appId] = list = new List<ElementId>();
@@ -621,7 +621,7 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     catch { /* ignore */ }
 
-    SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> MISS");
+  //  SC_LOG($"  [SC][RESOLVE] appId '{appId}' -> MISS");
     return Array.Empty<ElementId>();
   }
 
@@ -947,9 +947,9 @@ public partial class ConverterRevit : ISpeckleConverter
           .Select(x => string.Join("|", x.connectedElementUniqueIds ?? Enumerable.Empty<string>()))
           .ToList();
 
-        SC_LOG($"[SC][FLUSH][BEGIN] pending={_pendingSC.Count}");
-        SC_LOG($"[SC][FLUSH] pending host-keys:\n  - {string.Join("\n  - ", pendingKeys)}");
-        SC_LOG($"[SC][FLUSH] index keys:\n  - {string.Join("\n  - ", _appIdIndex.Keys)}");
+       // SC_LOG($"[SC][FLUSH][BEGIN] pending={_pendingSC.Count}");
+      //  SC_LOG($"[SC][FLUSH] pending host-keys:\n  - {string.Join("\n  - ", pendingKeys)}");
+      //  SC_LOG($"[SC][FLUSH] index keys:\n  - {string.Join("\n  - ", _appIdIndex.Keys)}");
 
         var pendings = _pendingSC.ToList(); // snapshot
         _pendingSC.Clear();
@@ -958,13 +958,13 @@ public partial class ConverterRevit : ISpeckleConverter
         int processed = 0;
         foreach (var sc in pendings)
         {
-          SC_LOG($"[SC][FLUSH][TRY] appId='{sc.applicationId}' hosts={string.Join(",", sc.connectedElementUniqueIds ?? Enumerable.Empty<string>())}");
+       //   SC_LOG($"[SC][FLUSH][TRY] appId='{sc.applicationId}' hosts={string.Join(",", sc.connectedElementUniqueIds ?? Enumerable.Empty<string>())}");
           var res = ConvertToNative(sc);   // re-run with hosts now in the model
           results.Add(res);
           processed++;
         }
 
-        SC_LOG($"[SC][FLUSH][END] processed={processed}");
+      //  SC_LOG($"[SC][FLUSH][END] processed={processed}");
       }
       finally
       {
@@ -973,7 +973,7 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     else
     {
-      SC_LOG("[SC][FLUSH] skipped (no pending)");
+      //SC_LOG("[SC][FLUSH] skipped (no pending)");
     }
 
     return results;
@@ -984,7 +984,7 @@ public partial class ConverterRevit : ISpeckleConverter
   {
     if (Doc.IsModifiable)
     {
-      SC_LOG($"[TX] SubTransaction: {name}");
+     // SC_LOG($"[TX] SubTransaction: {name}");
       using (var st = new SubTransaction(Doc))
       {
         st.Start();
@@ -995,7 +995,7 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     else
     {
-      SC_LOG($"[TX] Transaction: {name}");
+   //   SC_LOG($"[TX] Transaction: {name}");
       using (var tx = new Transaction(Doc, name))
       {
         tx.Start();
@@ -1081,7 +1081,7 @@ public partial class ConverterRevit : ISpeckleConverter
     if (ids.Count == 0) return;
 
     _appIdIndex[appId] = ids;
-    SC_LOG($"[IDX][ADD] {appId} -> [{string.Join(",", ids.Select(i => i.IntegerValue))}]");
+    //SC_LOG($"[IDX][ADD] {appId} -> [{string.Join(",", ids.Select(i => i.IntegerValue))}]");
   }
 
 
@@ -1091,7 +1091,7 @@ public partial class ConverterRevit : ISpeckleConverter
     var key = speckle?.applicationId ?? speckle?["applicationId"] as string;
     if (string.IsNullOrWhiteSpace(key))
     {
-      SC_LOG($"[IDX][SKIP] no appId for {el.Id.IntegerValue} ({el.GetType().Name})");
+     // SC_LOG($"[IDX][SKIP] no appId for {el.Id.IntegerValue} ({el.GetType().Name})");
       return;
     }
 
@@ -1105,7 +1105,7 @@ public partial class ConverterRevit : ISpeckleConverter
         if (!string.Equals(prev, key, StringComparison.OrdinalIgnoreCase))
         {
           p.Set(key);
-          SC_LOG($"[IDX][STAMP] {el.Id.IntegerValue} param=Speckle.ApplicationId set to '{key}' (was '{prev}')");
+        //  SC_LOG($"[IDX][STAMP] {el.Id.IntegerValue} param=Speckle.ApplicationId set to '{key}' (was '{prev}')");
         }
       }
     }
@@ -1116,7 +1116,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
     if (!list.Contains(el.Id)) list.Add(el.Id);
 
-    SC_LOG($"[IDX][ADD] {key} -> [{string.Join(",", list.Select(x => x.IntegerValue))}] ({el.GetType().Name})");
+   // SC_LOG($"[IDX][ADD] {key} -> [{string.Join(",", list.Select(x => x.IntegerValue))}] ({el.GetType().Name})");
     TryResolvePendingForKey(key);   // <— add this line
 
   }
@@ -1130,7 +1130,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
     // Find pending SCs that include this key AND now have all hosts available in the index
     var ready = new List<Objects.BuiltElements.Revit.StructuralConnection>();
-    SC_LOG($"[SC][FLUSH] starting, pending={_pendingSC.Count}, indexKeys={_appIdIndex.Count}");
+   // SC_LOG($"[SC][FLUSH] starting, pending={_pendingSC.Count}, indexKeys={_appIdIndex.Count}");
 
     foreach (var sc in _pendingSC)
     {
@@ -1147,7 +1147,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
     if (ready.Count == 0) return;
 
-    SC_LOG($"[SC][RESOLVE] key '{key}' unlocked {ready.Count} pending connection(s)");
+   // SC_LOG($"[SC][RESOLVE] key '{key}' unlocked {ready.Count} pending connection(s)");
 
     // Remove from pending before attempting to create
     foreach (var sc in ready)
