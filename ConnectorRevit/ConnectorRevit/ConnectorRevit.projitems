@@ -59,6 +59,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)UI\ConnectorBindingsRevit.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UI\ConnectorBindingsRevit.Selection.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UI\ConnectorBindingsRevit.Send.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)UI\DebugFileLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UI\Panel.xaml.cs">
       <DependentUpon>Panel.xaml</DependentUpon>
     </Compile>

@@ -210,9 +210,17 @@ public partial class ConverterRevit : ISpeckleConverter
 
   public Base ConvertToSpeckle(object @object)
   {
+    Dbg.W("1");
+
+    Dbg.W("0");
+    Dbg.W($"[ConvertToSpeckle] input = {@object?.GetType()?.FullName ?? "<null>"}");
+
+    Dbg.W("1");
     Base returnObject = null;
     List<string> notes = new();
+    Dbg.W("2");
     string id = @object is Element element ? element.UniqueId : string.Empty;
+    Dbg.W("3");
 
     switch (@object)
     {
@@ -226,7 +234,42 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = DirectShapeToSpeckle(o);
         break;
       case DB.FamilyInstance o:
-        returnObject = FamilyInstanceToSpeckle(o, out notes);
+        Report.Log("Checking");
+        var isStructConn =
+          o.Category?.Id.IntegerValue == (int)BuiltInCategory.OST_StructConnections
+          || o.Symbol?.Category?.Id.IntegerValue == (int)BuiltInCategory.OST_StructConnections;
+        if (isStructConn)
+          Dbg.W($"[SC→Speckle] FI {o.UniqueId} as StructuralConnection");
+        else
+          Dbg.W($"[FI→Speckle] {o.UniqueId} cat={(BuiltInCategory?)o.Category?.Id.IntegerValue}");
+
+        if (isStructConn)
+        {
+          returnObject = StructuralConnectionFamilyInstanceToSpeckle(o);
+        }
+        else
+        {
+          returnObject = FamilyInstanceToSpeckle(o, out notes);
+        }
+
+
+        Dbg.W($"[FI→ret] type={returnObject?.GetType()?.FullName ?? "<null>"} uid={returnObject?.applicationId ?? "<null>"}");
+        try
+        {
+          var dv = returnObject?["displayValue"] as System.Collections.IEnumerable;
+          int n = 0;
+          if (dv != null) foreach (var _ in dv) n++;
+          Dbg.W($"[FI→ret] hasDV={(dv != null)} dvCount={n}");
+        }
+        catch { Dbg.W("[FI→ret] displayValue introspection failed"); }
+
+
+
+
+
+
+
+
         break;
       case DB.Floor o:
         returnObject = FloorToSpeckle(o, out notes);
@@ -358,7 +401,7 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = BoundaryConditionsToSpeckle(o);
         break;
       case DB.Structure.StructuralConnectionHandler o:
-        returnObject = StructuralConnectionHandlerToSpeckle(o);
+        returnObject = StructuralConnectionToSpeckle(o); // returns BER.StructuralConnection
         break;
       case DB.CombinableElement o:
         returnObject = CombinableElementToSpeckle(o);
@@ -475,6 +518,8 @@ public partial class ConverterRevit : ISpeckleConverter
     return speckleSchema;
   }
 
+  // ConverterRevit class field
+  private readonly Dictionary<string, ElementId> _byAppId = new();
   public object ConvertToNative(Base @base)
   {
     var nativeObject = ConvertToNativeObject(@base);
@@ -482,17 +527,42 @@ public partial class ConverterRevit : ISpeckleConverter
     switch (nativeObject)
     {
       case ApplicationObject appObject:
-        if (appObject.Converted.Cast<Element>().ToList() is List<Element> typedList && typedList.Count >= 1)
         {
-          receivedObjectsCache?.AddConvertedObjects(@base, typedList);
+          var lst = appObject.Converted.Cast<Element>().ToList();
+          if (lst.Count > 0)
+          {
+            receivedObjectsCache?.AddConvertedObjects(@base, lst);
+            if (!string.IsNullOrWhiteSpace(@base.applicationId))
+            {
+              _byAppId[@base.applicationId] = lst[0].Id;
+              Dbg.W($"[IDX] appObj add aid={@base.applicationId} → {lst[0].Id.IntegerValue}");
+            }
+          }
+          break;
         }
-        break;
       case Element element:
-        receivedObjectsCache?.AddConvertedObjects(@base, new List<Element> { element });
+        {
+          receivedObjectsCache?.AddConvertedObjects(@base, new List<Element> { element });
+          if (!string.IsNullOrWhiteSpace(@base.applicationId))
+          {
+            _byAppId[@base.applicationId] = element.Id;
+            Dbg.W($"[IDX] elem add aid={@base.applicationId} → {element.Id.IntegerValue}");
+          }
+          break;
+        }
+      default:
+        Dbg.W($"[IDX] nothing indexed for {@base?.applicationId ?? "<no-appId>"} type={@base?.GetType()?.Name}");
         break;
     }
 
     return nativeObject;
+  }
+
+  // Extend your existing ConvertToNative(..) to populate the map:
+  private Element TryRecentlyConvertedByAppId(string appId)
+  {
+    if (string.IsNullOrWhiteSpace(appId)) return null;
+    return _byAppId.TryGetValue(appId, out var eid) ? Doc.GetElement(eid) : null;
   }
 
   public object ConvertToNativeObject(Base @object)
@@ -508,12 +578,11 @@ public partial class ConverterRevit : ISpeckleConverter
     Settings.TryGetValue("recieve-objects-mesh", out string recieveModelMesh);
     if (bool.Parse(recieveModelMesh ?? "false"))
     {
-      if ((@object is Other.Instance || @object.IsDisplayableObject()) && @object is not BE.Room)
+      // DO NOT force mesh path for native-convertible Revit objects we care about
+      if (@object is not BER.StructuralConnection)
       {
-        return DisplayableObjectToNative(@object);
-      }
-      else
-      {
+        if ((@object is Other.Instance || @object.IsDisplayableObject()) && @object is not BE.Room)
+          return DisplayableObjectToNative(@object);
         return null;
       }
     }
@@ -650,6 +719,8 @@ public partial class ConverterRevit : ISpeckleConverter
 
       case BE.Roof o:
         return RoofToNative(o);
+      case BER.StructuralConnection o:
+        return StructuralConnectionToNativeWrap(o);
 
       case BE.Topography o:
         return TopographyToNative(o);
@@ -770,9 +841,120 @@ public partial class ConverterRevit : ISpeckleConverter
     return nativeObject;
   }
 
-  public List<Base> ConvertToSpeckle(List<object> objects) => objects.Select(ConvertToSpeckle).ToList();
+  public List<Base> ConvertToSpeckle(List<object> objects)
+  {
+    Dbg.W($"[list] IN count={objects?.Count ?? -1}");
+    var list = new List<Base>();
 
-  public List<object> ConvertToNative(List<Base> objects) => objects.Select(ConvertToNative).ToList();
+    foreach (var o in objects)
+    {
+      var uid = (o as Autodesk.Revit.DB.Element)?.UniqueId ?? "<null>";
+      Dbg.W($"[list] pre-call type={o?.GetType()?.FullName ?? "<null>"} uid={uid}");
+
+      Base b = null;
+      try { b = ConvertToSpeckle(o); }
+      catch (Exception ex) { Dbg.W($"[list] Convert EX uid={uid} ex={ex}"); }
+
+      if (b == null)
+      {
+        Dbg.W($"[list] NULL result uid={uid}");
+        continue;
+      }
+
+      int dvCount = -1;
+      try
+      {
+        var dv = b["displayValue"] as System.Collections.IEnumerable;
+        dvCount = 0; if (dv != null) foreach (var _ in dv) dvCount++;
+      }
+      catch { /* ignore */ }
+
+      Dbg.W($"[list] post-call type={b.GetType().FullName} appId={b.applicationId} dvCount={dvCount}");
+      list.Add(b);
+    }
+
+    Dbg.W($"[list] OUT count={list.Count}");
+    return list;
+  }
+
+  // Replace the simple Select(..) implementation
+  private void DumpIdMap(string tag)
+  {
+    try
+    {
+      var head = _byAppId.Take(15).Select(kv => $"{kv.Key}→{kv.Value.IntegerValue}").ToList();
+      Dbg.W($"{tag} idmap.count={_byAppId.Count} sample=[{string.Join(", ", head)}]");
+    }
+    catch (Exception ex) { Dbg.W($"{tag} DumpIdMap ex: {ex.Message}"); }
+  }
+
+
+  public List<object> ConvertToNative(List<Base> objects)
+  {
+    Dbg.W($"[RX] ConvertToNative(List) ENTER count={objects?.Count ?? -1}");
+
+    var nonSC = new List<Base>();
+    var scs = new List<Base>();
+
+    foreach (var b in objects)
+    {
+      var isSC = b is BER.StructuralConnection;
+      var aid = b?.applicationId ?? "<no-appId>";
+      Dbg.W($"[RX] classify aid={aid} type={b?.GetType()?.FullName} isSC={isSC}");
+      if (isSC) scs.Add(b); else nonSC.Add(b);
+    }
+
+    Dbg.W($"[RX] pass1 nonSC={nonSC.Count}  pass2 SC={scs.Count}");
+
+    var results = new List<object>(objects.Count);
+
+    // ───────── PASS 1: all non-SC
+    Dbg.W("[RX] PASS1 begin (nonSC)");
+    int i = 0;
+    foreach (var b in nonSC)
+    {
+      var aid = b?.applicationId ?? "<no-appId>";
+      Dbg.W($"[RX] PASS1[{i}] → ConvertToNative type={b?.GetType()?.Name} aid={aid}");
+      try
+      {
+        var native = ConvertToNative(b);
+        results.Add(native);
+        Dbg.W($"[RX] PASS1[{i}] done; idmap.size={_byAppId.Count}");
+      }
+      catch (Exception ex)
+      {
+        Dbg.W($"[RX] PASS1[{i}] FAIL: {ex.GetType().Name}: {ex.Message}");
+        throw;
+      }
+      i++;
+    }
+    DumpIdMap("[RX] after PASS1");
+
+    // ───────── PASS 2: StructuralConnections
+    Dbg.W("[RX] PASS2 begin (SC)");
+    i = 0;
+    foreach (var b in scs)
+    {
+      var aid = b?.applicationId ?? "<no-appId>";
+      Dbg.W($"[RX] PASS2[{i}] → ConvertToNative (SC) aid={aid}");
+      try
+      {
+        var native = ConvertToNative(b);
+        results.Add(native);
+        Dbg.W($"[RX] PASS2[{i}] done; idmap.size={_byAppId.Count}");
+      }
+      catch (Exception ex)
+      {
+        Dbg.W($"[RX] PASS2[{i}] FAIL: {ex.GetType().Name}: {ex.Message}");
+        throw;
+      }
+      i++;
+    }
+
+    Dbg.W($"[RX] ConvertToNative(List) EXIT results={results.Count}");
+    return results;
+  }
+
 
   public bool CanConvertToSpeckle(object @object)
   {
@@ -808,6 +990,8 @@ public partial class ConverterRevit : ISpeckleConverter
       DB.Architecture.Railing _ => true,
       DB.Architecture.TopRail _ => true,
       DB.Ceiling _ => true,
+      DB.Structure.StructuralConnectionHandler _ => true,
+
       DB.PointCloudInstance _ => true,
       DB.Group _ => true,
       DB.ProjectInfo _ => true,
@@ -882,6 +1066,8 @@ public partial class ConverterRevit : ISpeckleConverter
       BE.Opening _ => true,
       BERC.RoomBoundaryLine _ => true,
       BERC.SpaceSeparationLine _ => true,
+      BER.StructuralConnection _ => true,
+
       BE.Roof _ => true,
 
 #if (REVIT2024)
