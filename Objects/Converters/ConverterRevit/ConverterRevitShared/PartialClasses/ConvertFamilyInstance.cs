@@ -281,137 +281,72 @@ public partial class ConverterRevit
     return appObj;
   }
 
+  #endregion
+
+  // If you also need the hosted creator with explicit types:
   private DB.FamilyInstance CreateHostedFamilyInstance(
     ApplicationObject appObj,
     DB.FamilySymbol familySymbol,
     XYZ insertionPoint,
     DB.Level level,
-    bool isUGridLine = false
-  )
+    bool isUGridLine = false)
   {
     DB.FamilyInstance familyInstance = null;
-    //If the current host element is not null, it means we're coming from inside a nested conversion.
 
-    if (level == null)
-    {
+    if (level == null && CurrentHostElement != null)
       level = Doc.GetElement(CurrentHostElement.LevelId) as DB.Level;
-    }
 
-    // there are two (i think) main types of hosted elements which can be found with family.familyplacementtype
-    // the two placement types for hosted elements are onelevelbasedhosted and workplanebased
-
-    if (familySymbol.Family.FamilyPlacementType == FamilyPlacementType.OneLevelBasedHosted)
+    if (familySymbol.Family.FamilyPlacementType == DB.FamilyPlacementType.OneLevelBasedHosted)
     {
       familyInstance = Doc.Create.NewFamilyInstance(
-        insertionPoint,
-        familySymbol,
-        CurrentHostElement,
-        level,
-        StructuralType.NonStructural
-      );
+        insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
     }
-    else if (familySymbol.Family.FamilyPlacementType == FamilyPlacementType.WorkPlaneBased)
+    else if (familySymbol.Family.FamilyPlacementType == DB.FamilyPlacementType.WorkPlaneBased)
     {
-      if (CurrentHostElement == null)
+      if (CurrentHostElement is not Element el)
       {
-        appObj.Update(
-          status: ApplicationObject.State.Failed,
-          logItem: $"Object is work plane based but does not have a host element"
-        );
+        appObj.Update(status: ApplicationObject.State.Failed, logItem: "Work plane based but no host element.");
         return null;
       }
-      if (CurrentHostElement is Element el)
-      {
-        Doc.Regenerate();
 
-        Options op = new();
-        op.ComputeReferences = true;
-        GeometryElement geomElement = el.get_Geometry(op);
-        Reference faceRef = null;
-        var planeDist = double.MaxValue;
+      Doc.Regenerate();
 
-        GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
+      var op = new Options { ComputeReferences = true };
+      var geomElement = el.get_Geometry(op);
+      Reference faceRef = null;
+      var planeDist = double.MaxValue;
+      GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
 
-        XYZ norm = new(0, 0, 0);
-        familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, norm, familySymbol);
+      var norm = new XYZ(0, 0, 0);
+      familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, norm, familySymbol);
 
-        // parameters
-        IList<DB.Parameter> cutVoidsParams = familySymbol.Family.GetParameters("Cut with Voids When Loaded");
-        IList<DB.Parameter> lvlParams = familyInstance.GetParameters("Schedule Level");
+      var cutVoidsParams = familySymbol.Family.GetParameters("Cut with Voids When Loaded");
+      var lvlParams = familyInstance.GetParameters("Schedule Level");
 
-        if (cutVoidsParams.ElementAtOrDefault(0) != null && cutVoidsParams[0].AsInteger() == 1)
-        {
-          InstanceVoidCutUtils.AddInstanceVoidCut(Doc, el, familyInstance);
-        }
+      if (cutVoidsParams.ElementAtOrDefault(0) != null && cutVoidsParams[0].AsInteger() == 1)
+        InstanceVoidCutUtils.AddInstanceVoidCut(Doc, el, familyInstance);
 
-        if (lvlParams.ElementAtOrDefault(0) != null && level.Id is ElementId levelId)
-        {
-          lvlParams[0].Set(levelId);
-        }
-      }
-      else if (CurrentHostElement is DB.Floor floor)
-      {
-        // TODO: support hosted elements on floors. Should be very similar to above implementation
-        appObj.Update(
-          status: ApplicationObject.State.Failed,
-          logItem: $"Work Plane based families on floors to be supported soon"
-        );
-        return null;
-      }
-    }
-    else if (familySymbol.Family.FamilyPlacementType == FamilyPlacementType.OneLevelBased)
-    {
-      if (CurrentHostElement is FootPrintRoof roof)
-      {
-        // handle receiving mullions on a curtain roof
-        var curtainGrids = roof.CurtainGrids;
-        CurtainGrid lastGrid = null;
-        foreach (var curtainGrid in curtainGrids)
-        {
-          if (curtainGrid is CurtainGrid c)
-          {
-            lastGrid = c;
-          }
-        }
-
-        if (lastGrid != null && isUGridLine)
-        {
-          var gridLine = lastGrid.AddGridLine(isUGridLine, insertionPoint, false);
-          foreach (var seg in gridLine.AllSegmentCurves)
-          {
-            gridLine.AddMullions(seg as Curve, familySymbol as MullionType, isUGridLine);
-          }
-        }
-      }
+      if (lvlParams.ElementAtOrDefault(0) != null && level != null)
+        lvlParams[0].Set(level.Id);
     }
     else
-    {
-      appObj.Update(
-        status: ApplicationObject.State.Failed,
-        logItem: $"Unsupported FamilyPlacementType {familySymbol.Family.FamilyPlacementType}"
-      );
-      return null;
-    }
-    // try a catch all solution as a last resort
-    if (familyInstance == null)
     {
       try
       {
         familyInstance = Doc.Create.NewFamilyInstance(
-          insertionPoint,
-          familySymbol,
-          CurrentHostElement,
-          level,
-          StructuralType.NonStructural
-        );
+          insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
       }
-      catch (Autodesk.Revit.Exceptions.ApplicationException) { }
+      catch (Autodesk.Revit.Exceptions.ApplicationException)
+      {
+        appObj.Update(status: ApplicationObject.State.Failed,
+                      logItem: $"Unsupported placement type {familySymbol.Family.FamilyPlacementType}.");
+        return null;
+      }
     }
 
     return familyInstance;
   }
 
-  #endregion
 
   private void GetReferencePlane(
     GeometryElement geomElement,
@@ -494,19 +429,32 @@ public partial class ConverterRevit
     return new Other.Transform(vX, vY, vZ, t) { units = ModelUnits };
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+  // ---- replace your existing TransformToNative ----
   private Transform TransformToNative(Other.Transform transform)
   {
     var _transform = new Transform(Transform.Identity);
 
     // translation
-    if (transform.matrix.M44 == 0)
-    {
+    if (transform == null || transform.matrix.M44 == 0)
       return _transform;
-    }
 
-    var tX = ScaleToNative(transform.matrix.M14 / transform.matrix.M44, transform.units);
-    var tY = ScaleToNative(transform.matrix.M24 / transform.matrix.M44, transform.units);
-    var tZ = ScaleToNative(transform.matrix.M34 / transform.matrix.M44, transform.units);
+    var u = UnitsOrModel2(transform.units);
+
+    var tX = ScaleToNative(transform.matrix.M14 / transform.matrix.M44, u);
+    var tY = ScaleToNative(transform.matrix.M24 / transform.matrix.M44, u);
+    var tZ = ScaleToNative(transform.matrix.M34 / transform.matrix.M44, u);
     var t = new XYZ(tX, tY, tZ);
 
     // basis vectors
@@ -527,270 +475,35 @@ public partial class ConverterRevit
     return internalTransform;
   }
 
-  // revit instances
-  public ApplicationObject RevitInstanceToNative(RevitInstance instance, ApplicationObject appObj = null)
+
+
+
+
+
+
+
+  private string UnitsOrModel2(string units)
   {
-    DB.FamilyInstance familyInstance = null;
-    var docObj = GetExistingElementByApplicationId(instance.applicationId);
-    appObj ??= new ApplicationObject(instance.id, instance.speckle_type) { applicationId = instance.applicationId };
-    var isUpdate = false;
-
-    // skip if element already exists in doc & receive mode is set to ignore
-    if (IsIgnore(docObj, appObj))
-    {
-      return appObj;
-    }
-
-    // get the definition
-    var definition = instance.definition as RevitSymbolElementType;
-    var familySymbol = GetElementType<FamilySymbol>(definition, appObj, out bool isExactMatch);
-    if (familySymbol == null)
-    {
-      appObj.Update(status: ApplicationObject.State.Failed);
-      return appObj;
-    }
-
-    if (
-      familySymbol.Category.EqualsBuiltInCategory(BuiltInCategory.OST_CurtainWallMullions)
-      || familySymbol.Category.EqualsBuiltInCategory(BuiltInCategory.OST_CurtainWallPanels)
-    )
-    {
-      appObj.Update(
-        logItem: "Revit cannot create standalone curtain panels or mullions",
-        status: ApplicationObject.State.Skipped
-      );
-      return appObj;
-    }
-
-    // get the transform, insertion point, level, and placement type of the instance
-    var transform = TransformToNative(instance.transform);
-    DB.Level level = ConvertLevelToRevit(instance.level, out ApplicationObject.State levelState);
-    var insertionPoint = transform.OfPoint(XYZ.Zero);
-    FamilyPlacementType placement = Enum.TryParse<FamilyPlacementType>(
-      definition.placementType,
-      true,
-      out FamilyPlacementType placementType
-    )
-      ? placementType
-      : FamilyPlacementType.Invalid;
-
-    // check for existing and update if so
-    if (docObj != null)
-    {
-      try
-      {
-        var revitType = Doc.GetElement(docObj.GetTypeId()) as ElementType;
-
-        // if family changed, tough luck. delete and let us create a new one.
-        if (familySymbol.FamilyName != revitType.FamilyName)
-        {
-          Doc.Delete(docObj.Id);
-        }
-        else
-        {
-          familyInstance = (DB.FamilyInstance)docObj;
-
-          var newLocationPoint = new XYZ(
-            insertionPoint.X,
-            insertionPoint.Y,
-            (familyInstance.Location as LocationPoint).Point.Z
-          );
-          (familyInstance.Location as LocationPoint).Point = newLocationPoint;
-
-          // check for a type change
-          if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
-          {
-            familyInstance.ChangeTypeId(familySymbol.Id);
-          }
-
-          TrySetParam(familyInstance, BuiltInParameter.FAMILY_LEVEL_PARAM, level);
-          TrySetParam(familyInstance, BuiltInParameter.FAMILY_BASE_LEVEL_PARAM, level);
-        }
-        isUpdate = true;
-      }
-      catch (Autodesk.Revit.Exceptions.ApplicationException)
-      {
-        //something went wrong, re-create it
-      }
-    }
-
-    //create family instance
-
-    if (familyInstance == null)
-    {
-      switch (placement)
-      {
-        case FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
-          familyInstance = Doc.Create.NewFamilyInstance(
-            insertionPoint,
-            familySymbol,
-            CurrentHostElement,
-            level,
-            StructuralType.NonStructural
-          );
-          break;
-
-        case FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
-          Options op = new() { ComputeReferences = true };
-          GeometryElement geomElement = CurrentHostElement.get_Geometry(op);
-          if (geomElement == null)
-          {
-            // if host geom was null, then regenerate document and that should fix it
-            Doc.Regenerate();
-            geomElement = CurrentHostElement.get_Geometry(op);
-            // if regenerating didn't fix it then try generic method
-            // TODO: this won't be correct, maybe we should just throw an error?
-            if (geomElement == null)
-            {
-              goto default;
-            }
-          }
-          Reference faceRef = null;
-          var planeDist = double.MaxValue;
-          GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
-          XYZ norm = new(0, 0, 0);
-          try
-          {
-            familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, norm, familySymbol);
-          }
-          catch (Autodesk.Revit.Exceptions.ApplicationException e)
-          {
-            appObj.Update(
-              status: ApplicationObject.State.Failed,
-              logItem: $"Could not create WorkPlaneBased hosted instance: {e.Message}"
-            );
-            return appObj;
-          }
-          // parameters
-          IList<DB.Parameter> cutVoidsParams = familySymbol.Family.GetParameters("Cut with Voids When Loaded");
-          IList<DB.Parameter> lvlParams = familyInstance.GetParameters("Schedule Level");
-          if (cutVoidsParams.ElementAtOrDefault(0) != null && cutVoidsParams[0].AsInteger() == 1)
-          {
-            InstanceVoidCutUtils.AddInstanceVoidCut(Doc, CurrentHostElement, familyInstance);
-          }
-
-          if (lvlParams.ElementAtOrDefault(0) != null && level != null)
-          {
-            lvlParams[0].Set(level.Id);
-          }
-
-          break;
-
-        case FamilyPlacementType.OneLevelBased when CurrentHostElement is FootPrintRoof roof: // handle receiving mullions on a curtain roof
-          var curtainGrids = roof.CurtainGrids;
-          CurtainGrid lastGrid = null;
-          foreach (var curtainGrid in curtainGrids)
-          {
-            if (curtainGrid is CurtainGrid c)
-            {
-              lastGrid = c;
-            }
-          }
-
-          var isUGridLine = instance["isUGridLine"] as bool? != null ? (bool)instance["isUGridLine"] : false;
-          if (lastGrid != null && isUGridLine)
-          {
-            var gridLine = lastGrid.AddGridLine(isUGridLine, insertionPoint, false);
-            foreach (var seg in gridLine.AllSegmentCurves)
-            {
-              gridLine.AddMullions(seg as Curve, familySymbol as MullionType, isUGridLine);
-            }
-          }
-          break;
-
-        default:
-          familyInstance = Doc.Create.NewFamilyInstance(
-            insertionPoint,
-            familySymbol,
-            level,
-            StructuralType.NonStructural
-          );
-          break;
-      }
-    }
-
-    if (familyInstance == null)
-    {
-      appObj.Update(status: ApplicationObject.State.Failed, logItem: "Could not create instance");
-      return appObj;
-    }
-
-    Doc.Regenerate(); //required for mirroring and face flipping to work!
-
-    if (instance.mirrored != familyInstance.Mirrored)
-    {
-      // mirroring
-      // note: mirroring a hosted instance via api will fail, thanks revit: there is workaround hack to group the element -> mirror -> ungroup
-      Group group = null;
-      try
-      {
-        group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null;
-      }
-      catch (Autodesk.Revit.Exceptions.InvalidOperationException)
-      {
-        // sometimes the group can't be made. Just try to mirror the element on its own
-      }
-      var elementToMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
-
-      try
-      {
-        ElementTransformUtils.MirrorElements(
-          Doc,
-          elementToMirror,
-          DB.Plane.CreateByNormalAndOrigin(transform.BasisY, insertionPoint),
-          false
-        );
-      }
-      catch (Autodesk.Revit.Exceptions.ApplicationException e)
-      {
-        appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
-      }
-      group?.UngroupMembers();
-    }
-
-    // face flipping must happen after mirroring
-    if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped)
-    {
-      familyInstance.flipHand();
-    }
-
-    if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped)
-    {
-      familyInstance.flipFacing();
-    }
-
-    var currentTransform = familyInstance.GetTotalTransform();
-    var desiredBasisX = new Vector(transform.BasisX.X, transform.BasisX.Y, transform.BasisX.Z);
-    var currentBasisX = new Vector(currentTransform.BasisX.X, currentTransform.BasisX.Y, currentTransform.BasisX.Z);
-
-    // rotation about the z axis (signed)
-    var rotation = Math.Atan2(
-      Vector.DotProduct(
-        Vector.CrossProduct(desiredBasisX, currentBasisX),
-        new Vector(currentTransform.BasisZ.X, currentTransform.BasisZ.Y, currentTransform.BasisZ.Z)
-      ),
-      Vector.DotProduct(desiredBasisX, currentBasisX)
-    );
-
-    if (Math.Abs(rotation) > TOLERANCE && familyInstance.Location is LocationPoint location)
-    {
-      try // some point based families don't have a rotation, so keep this in a try catch
-      {
-        using var axis = DB.Line.CreateUnbound(location.Point, currentTransform.BasisZ);
-        location.Rotate(axis, -rotation);
-      }
-      catch (Autodesk.Revit.Exceptions.ApplicationException e)
-      {
-        appObj.Update(logItem: $"Could not rotate created instance: {e.Message}");
-      }
-    }
-
-    SetInstanceParameters(familyInstance, instance);
-    var state = isUpdate ? ApplicationObject.State.Updated : ApplicationObject.State.Created;
-    appObj.Update(status: state, createdId: familyInstance.UniqueId, convertedItem: familyInstance);
-    //appObj = SetHostedElements(instance, familyInstance, appObj);
-    return appObj;
+    return string.IsNullOrWhiteSpace(units) || units.Equals("none", StringComparison.OrdinalIgnoreCase)
+      ? ModelUnits
+      : units;
   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   public RevitInstance RevitInstanceToSpeckle(
     DB.FamilyInstance instance,

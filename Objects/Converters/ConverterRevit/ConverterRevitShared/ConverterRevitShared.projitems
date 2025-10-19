@@ -26,6 +26,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\ForgeTypeIdExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\ParameterExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\PointExtensions.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FileLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\Element2DOutlineBuilder.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\ParameterToSpeckleData.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)PartialClasses\ConvertAdaptiveComponent.cs" />
