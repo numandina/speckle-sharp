@@ -405,6 +405,81 @@ public partial class ConverterRevit : ISpeckleConverter
 
 
 
+
+
+
+  // helpers
+
+  // Find a structural column whose (string) parameter "applicationId" matches the given id.
+  private Element FindHostColumnByApplicationId(string appId)
+  {
+    if (string.IsNullOrWhiteSpace(appId)) return null;
+
+    var columns = new FilteredElementCollector(Doc)
+      .OfCategory(BuiltInCategory.OST_StructuralColumns)
+      .WhereElementIsNotElementType()
+      .ToElements();
+
+    foreach (var e in columns)
+    {
+      var v = GetParamString(e, "applicationId")
+           ?? GetParamString(e, "ApplicationId")
+           ?? GetParamString(e, "SpeckleApplicationId");
+      if (string.Equals(v, appId, StringComparison.OrdinalIgnoreCase))
+        return e;
+    }
+    return null;
+  }
+
+  private static string GetParamString(Element e, string name)
+  {
+    var p = e.LookupParameter(name);
+    if (p == null) return null;
+    try
+    {
+      if (p.StorageType == StorageType.String) return p.AsString();
+      return p.AsValueString(); // fallback for non-string storage
+    }
+    catch { return null; }
+  }
+
+  private static XYZ ElementCenter(Element e)
+  {
+    var bb = e.get_BoundingBox(null);
+    if (bb == null) return XYZ.Zero;
+    return (bb.Min + bb.Max) * 0.5;
+  }
+
+  // Reuse your existing face-picking logic, but with an explicit host Element
+  private Reference GetNearestPlanarFaceReference(Element host, XYZ nearPoint)
+  {
+    var op = new Options { ComputeReferences = true };
+    var ge = host.get_Geometry(op);
+    Reference faceRef = null;
+    double planeDist = double.MaxValue;
+    GetReferencePlane(ge, nearPoint, ref faceRef, ref planeDist);
+    return faceRef;
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   // reserved dynamic keys that must never be written
   private static readonly HashSet<string> _reservedDynKeys = new(StringComparer.OrdinalIgnoreCase)
 {
@@ -1048,18 +1123,380 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     return nativeObject;
   }
+  public ApplicationObject RevitInstanceToNative(Objects.Other.Revit.RevitInstance instance, ApplicationObject appObj = null)
+  {
+    DB.FamilyInstance familyInstance = null;
+    var docObj = GetExistingElementByApplicationId(instance?.applicationId);
+    appObj ??= new ApplicationObject(instance?.id, instance?.speckle_type) { applicationId = instance?.applicationId };
+    var isUpdate = false;
 
+    if (instance == null)
+    {
+      appObj.Update(status: ApplicationObject.State.Failed, logItem: "Instance was null.");
+      return appObj;
+    }
 
+    if (IsIgnore(docObj, appObj))
+      return appObj;
 
+    // ---- resolve symbol ----
+    var def =
+        instance.typedDefinition as Objects.BuiltElements.Revit.RevitSymbolElementType
+        ?? instance.definition as Objects.BuiltElements.Revit.RevitSymbolElementType
+        ?? instance["symbol"] as Objects.BuiltElements.Revit.RevitSymbolElementType;
 
+    DB.FamilySymbol familySymbol = null;
+    bool isExactMatch = false;
 
+    if (def != null)
+      familySymbol = GetElementType<DB.FamilySymbol>(def, appObj, out isExactMatch);
 
+    if (familySymbol == null)
+    {
+      var fam = instance["family"] as string;
+      var typ = instance["type"] as string;
+      if (!string.IsNullOrWhiteSpace(fam) && !string.IsNullOrWhiteSpace(typ))
+        familySymbol = FindFamilySymbolByName(fam, typ);
+    }
 
+    if (familySymbol == null)
+    {
+      appObj.Update(status: ApplicationObject.State.Failed,
+                    logItem: $"Family/type not found. family='{instance["family"] ?? "<null>"}' type='{instance["type"] ?? "<null>"}'.");
+      return appObj;
+    }
 
+    if (!familySymbol.IsActive)
+      familySymbol.Activate();
 
+    // ---- level ----
+    DB.Level level = ConvertLevelToRevit(instance.level, out ApplicationObject.State _);
+    if (level == null)
+    {
+      level = FallbackLevel(instance["levelUniqueId"] as string) ?? CreateLevelIfNone();
+      if (level == null)
+      {
+        appObj.Update(status: ApplicationObject.State.Failed, logItem: "No Level found or could be created.");
+        return appObj;
+      }
+    }
 
+    // ---- placement type ----
+    string placementStr = (def?.placementType ?? instance["placementType"] as string) ?? string.Empty;
+    var placement = Enum.TryParse<DB.FamilyPlacementType>(placementStr, true, out var placementType)
+                      ? placementType
+                      : familySymbol.Family?.FamilyPlacementType ?? DB.FamilyPlacementType.Invalid;
 
-  // ---- replace your existing RevitInstanceToNative ----
+    bool hasPlacementPoint = instance["placementPoint"] is Objects.Geometry.Point;
+    bool hasTransform = instance.transform != null;
+    bool isWorkPlaneBased = placement == DB.FamilyPlacementType.WorkPlaneBased;
+    bool forceNamedWorkPlane = isWorkPlaneBased && (hasPlacementPoint || hasTransform);
+
+    // ---- yaw (radians) from payload ----
+    double? yawRad = null;
+    if (instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
+      yawRad = rwpi.rotation;
+    if (!yawRad.HasValue && instance["rotation"] is double rotVal)
+      yawRad = rotVal;
+
+    DebugLog($"[RVTIN] instance:{instance.applicationId} fam:'{familySymbol.FamilyName}' type:'{familySymbol.Name}' " +
+             $"placement:{placement} (raw:'{placementStr}') level:{level?.Name ?? "<null>"} " +
+             $"hasPlacementPoint:{hasPlacementPoint} hasTransform:{hasTransform} WPBased:{isWorkPlaneBased} yaw(rad):{(yawRad?.ToString() ?? "<none>")}");
+
+    // ---------------- Insertion point (external -> internal) ----------------
+    // Important: apply docT only if we USED placementPoint (not just because transform exists).
+    XYZ insertionExt;       // external/shared coords after unit scale OR internal if from transform
+    bool usedPlacementPoint = false;
+
+    if (hasPlacementPoint)
+    {
+      var pp = (Objects.Geometry.Point)instance["placementPoint"];
+      var u = UnitsOrModel(pp.units); // "m" from Unity sender
+      insertionExt = new XYZ(
+        ScaleToNative(pp.x, u),
+        ScaleToNative(pp.y, u),
+        ScaleToNative(pp.z, u)
+      );
+      usedPlacementPoint = true;
+      DebugLog($"[RVTIN] placementPoint external (scaled): {insertionExt}  units:{u}");
+    }
+    else if (hasTransform)
+    {
+      var t = TransformToNative(instance.transform); // already applies doc ref transform
+      insertionExt = t.OfPoint(XYZ.Zero);            // this is INTERNAL already
+      usedPlacementPoint = false;
+      DebugLog($"[RVTIN] insertion from transform (already internal): {insertionExt}");
+    }
+    else
+    {
+      insertionExt = XYZ.Zero;
+      usedPlacementPoint = true; // treat Zero as external so docT is applied (harmless if identity)
+      DebugLog($"[RVTIN] no point/transform -> using ZERO external");
+    }
+
+    var docT = GetDocReferencePointTransform(Doc);
+    DebugLog($"[RVTIN] docT: O={docT.Origin} X={docT.BasisX} Y={docT.BasisY} Z={docT.BasisZ}");
+
+    var insertionPoint = usedPlacementPoint ? docT.OfPoint(insertionExt) : insertionExt;
+    DebugLog($"[RVTIN] insertionPoint INTERNAL = {(usedPlacementPoint ? "docT.OfPoint(external)" : "internal from transform")} -> {insertionPoint}");
+
+    // ---------------- UPDATE PATH ----------------
+    if (docObj != null)
+    {
+      try
+      {
+        var revitType = Doc.GetElement(docObj.GetTypeId()) as ElementType;
+
+        if (revitType == null || familySymbol.FamilyName != revitType.FamilyName)
+        {
+          DebugLog($"[RVTIN] Existing type family mismatch -> deleting {docObj.Id.IntegerValue}");
+          Doc.Delete(docObj.Id);
+        }
+        else
+        {
+          familyInstance = (DB.FamilyInstance)docObj;
+          DebugLog($"[RVTIN] Updating existing uid:{familyInstance.UniqueId} host:{familyInstance.Host?.Id.IntegerValue}");
+
+          if (forceNamedWorkPlane)
+          {
+            DebugLog("[RVTIN] WorkPlaneBased + plane may change -> recreate to reset host plane.");
+            Doc.Delete(docObj.Id);
+            familyInstance = null;
+          }
+          else
+          {
+            var newPt = new XYZ(insertionPoint.X, insertionPoint.Y, (familyInstance.Location as DB.LocationPoint).Point.Z);
+            (familyInstance.Location as DB.LocationPoint).Point = newPt;
+            if ((familyInstance.Location as DB.LocationPoint).Point != newPt)
+              (familyInstance.Location as DB.LocationPoint).Point = newPt;
+
+            if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+            {
+              DebugLog($"[RVTIN] Type change (old:{revitType.Id.IntegerValue}, new:{familySymbol.Id.IntegerValue})");
+              familyInstance.ChangeTypeId(familySymbol.Id);
+            }
+
+            TrySetParam(familyInstance, DB.BuiltInParameter.FAMILY_LEVEL_PARAM, level);
+            TrySetParam(familyInstance, DB.BuiltInParameter.FAMILY_BASE_LEVEL_PARAM, level);
+          }
+        }
+        isUpdate = familyInstance != null;
+      }
+      catch (Autodesk.Revit.Exceptions.ApplicationException ex)
+      {
+        DebugLog($"[RVTIN] Update path threw, will recreate. {ex.GetType().Name}: {ex.Message}");
+        // fall-through
+      }
+    }
+
+    // ---------------- CREATE PATH ----------------
+    if (familyInstance == null)
+    {
+      if (forceNamedWorkPlane)
+      {
+        DB.ReferencePlane rp = null;
+        DB.SketchPlane sp = null;
+
+        // a non-template plan view for RP creation
+        DB.View viewForRp = Doc.ActiveView;
+        if (viewForRp == null || viewForRp.IsTemplate)
+        {
+          viewForRp = new FilteredElementCollector(Doc)
+                      .OfClass(typeof(DB.ViewPlan))
+                      .Cast<DB.ViewPlan>()
+                      .FirstOrDefault(v => !v.IsTemplate);
+        }
+        if (viewForRp == null)
+          DebugLog("[RVTIN] No suitable ViewPlan found for ReferencePlane; will still try.");
+
+        try
+        {
+          var origin = insertionPoint;        // INTERNAL
+          var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, yawRad ?? 0.0);
+          var yDir = rotT.OfVector(DB.XYZ.BasisY);           // rotate Y around Z by yaw
+          var bubble = origin;                                  // start
+          var free = origin + yDir;                           // along rotated Y
+          var cut = DB.XYZ.BasisZ;                           // up; normal = (free-bubble) x cut
+
+          rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
+
+          var guid8 = Guid.NewGuid().ToString("N").Substring(0, 8);
+          rp.Name = $"SPK_{guid8}";
+          DebugLog($"[RVTIN] RP id:{rp.Id.IntegerValue} name:'{rp.Name}' at {origin}  yaw(rad):{(yawRad ?? 0.0):0.###}");
+        }
+        catch (Exception ex)
+        {
+          DebugLog($"[RVTIN] ReferencePlane creation failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        try
+        {
+#if REVIT2019 || REVIT2020 || REVIT2021 || REVIT2022 || REVIT2023 || REVIT2024 || REVIT2025
+          sp = (rp != null)
+               ? DB.SketchPlane.Create(Doc, rp.Id)
+               : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint)); // vertical fallback
+#else
+        sp = (rp != null)
+             ? DB.SketchPlane.Create(Doc, rp)
+             : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
+#endif
+          DebugLog($"[RVTIN] SP id:{sp?.Id.IntegerValue} {(rp != null ? "(from RP)" : "(raw Plane)")}");
+        }
+        catch (Exception ex)
+        {
+          DebugLog($"[RVTIN] SketchPlane creation failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (sp != null)
+        {
+          try
+          {
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, sp, DB.Structure.StructuralType.NonStructural);
+
+            var skParam = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM);
+            if (skParam != null && !skParam.IsReadOnly) skParam.Set(sp.Id);
+
+            var skId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId()?.IntegerValue;
+            var spName = (skId.HasValue && skId.Value > 0) ? (Doc.GetElement(new ElementId(skId.Value)) as DB.SketchPlane)?.Name : "<none>";
+            DebugLog($"[RVTIN] Placed on SP. host:{familyInstance.Host?.Id.IntegerValue} SKETCH_PLANE_PARAM:{(skId > 0 ? skId.ToString() : "<none>")} name:{spName}");
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN] NewFamilyInstance(SketchPlane) failed: {ex.GetType().Name}: {ex.Message}");
+          }
+        }
+
+        if (familyInstance == null)
+        {
+          DebugLog("[RVTIN] Fallback: place by level (no SketchPlane).");
+          try
+          {
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN] Fallback placement failed: {ex.GetType().Name}: {ex.Message}");
+          }
+        }
+      }
+      else
+      {
+        // non-WP-based legacy path
+        switch (placement)
+        {
+          case DB.FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
+            DebugLog($"[RVTIN] Created hosted on CurrentHostElement:{CurrentHostElement?.Id.IntegerValue}");
+            break;
+
+          case DB.FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
+            {
+              var op = new DB.Options { ComputeReferences = true };
+              var geomElement = CurrentHostElement.get_Geometry(op);
+              if (geomElement == null)
+              {
+                Doc.Regenerate();
+                geomElement = CurrentHostElement.get_Geometry(op);
+              }
+              if (geomElement == null) goto default;
+
+              DB.Reference faceRef = null;
+              var planeDist = double.MaxValue;
+              GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
+
+              familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new DB.XYZ(0, 0, 0), familySymbol);
+              DebugLog($"[RVTIN] WP-based on face of CurrentHostElement:{CurrentHostElement?.Id.IntegerValue}");
+
+              var lvlParams = familyInstance.GetParameters("Schedule Level");
+              if (lvlParams?.Count > 0 && level != null) lvlParams[0].Set(level.Id);
+              break;
+            }
+
+          default:
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+            DebugLog($"[RVTIN] Created default (no explicit host).");
+            break;
+        }
+      }
+    }
+
+    if (familyInstance == null)
+    {
+      appObj.Update(status: ApplicationObject.State.Failed, logItem: "Could not create instance.");
+      DebugLog("[RVTIN] FAIL: familyInstance is null after all strategies.");
+      return appObj;
+    }
+
+    Doc.Regenerate();
+
+    // ---- Rotation handling ----
+    // WP-based: plane already carries yaw; do NOT rotate instance.
+    if (!isWorkPlaneBased)
+    {
+      if (yawRad.HasValue && Math.Abs(yawRad.Value) > 1e-9 && familyInstance.Location is DB.LocationPoint lpt)
+      {
+        var axis = DB.Line.CreateUnbound(lpt.Point, DB.XYZ.BasisZ);
+        try
+        {
+          DB.ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, yawRad.Value);
+          DebugLog($"[RVTIN] Applied yaw to non-WP family: {yawRad.Value} rad ({yawRad.Value * 180.0 / Math.PI:0.###}°)");
+        }
+        catch (Autodesk.Revit.Exceptions.ApplicationException e)
+        {
+          appObj.Update(logItem: $"Could not rotate instance by 'rotation': {e.Message}");
+        }
+      }
+    }
+    else
+    {
+      DebugLog("[RVTIN] WP-based: plane carries yaw; skipped instance rotation.");
+    }
+
+    // flips/mirror kept
+    if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped) familyInstance.flipHand();
+    if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped) familyInstance.flipFacing();
+    if (instance.mirrored != familyInstance.Mirrored)
+    {
+      DB.Group group = null;
+      try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
+      catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
+
+      var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
+      try
+      {
+        DB.ElementTransformUtils.MirrorElements(
+          Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisY, insertionPoint), false);
+      }
+      catch (Autodesk.Revit.Exceptions.ApplicationException e)
+      {
+        appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
+      }
+      group?.UngroupMembers();
+    }
+
+    // diagnostics: host & work plane & final location
+    var hostId = familyInstance.Host?.Id.IntegerValue;
+    var skPlaneId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
+    var skPlaneStr = (skPlaneId != null && skPlaneId.IntegerValue > 0) ? $"{skPlaneId.IntegerValue}" : "<none>";
+    var planeName = skPlaneId != null && skPlaneId.IntegerValue > 0
+                      ? (Doc.GetElement(skPlaneId) as DB.SketchPlane)?.Name
+                      : "<none>";
+    if (familyInstance.Location is DB.LocationPoint finalLp)
+      DebugLog($"[RVTIN] Final location INTERNAL: {finalLp.Point}");
+    DebugLog($"[RVTIN] Final: host:{(hostId.HasValue ? hostId.ToString() : "<null>")} SKETCH_PLANE_PARAM:{skPlaneStr} name:{planeName}");
+
+    SetInstanceParameters(familyInstance, instance);
+    var state = isUpdate ? ApplicationObject.State.Updated : ApplicationObject.State.Created;
+    appObj.Update(status: state, createdId: familyInstance.UniqueId, convertedItem: familyInstance);
+    return appObj;
+  }
+
+  // old
+  /*
   public ApplicationObject RevitInstanceToNative(Objects.Other.Revit.RevitInstance instance, ApplicationObject appObj = null)
   {
     DB.FamilyInstance familyInstance = null;
@@ -1106,27 +1543,6 @@ public partial class ConverterRevit : ISpeckleConverter
     if (!familySymbol.IsActive)
       familySymbol.Activate();
 
-    // Insertion point (use ModelUnits if point has null/'none' units)
-    XYZ insertionPoint;
-    if (instance["placementPoint"] is Objects.Geometry.Point pp)
-    {
-      var u = UnitsOrModel(pp.units);
-      insertionPoint = new XYZ(
-        ScaleToNative(pp.x, u),
-        ScaleToNative(pp.y, u),
-        ScaleToNative(pp.z, u)
-      );
-    }
-    else if (instance.transform != null)
-    {
-      var t = TransformToNative(instance.transform); // TransformToNative now defaults units -> ModelUnits
-      insertionPoint = t.OfPoint(XYZ.Zero);
-    }
-    else
-    {
-      insertionPoint = XYZ.Zero;
-    }
-
     // Level
     DB.Level level = ConvertLevelToRevit(instance.level, out ApplicationObject.State _);
     if (level == null)
@@ -1145,6 +1561,48 @@ public partial class ConverterRevit : ISpeckleConverter
                       ? placementType
                       : familySymbol.Family?.FamilyPlacementType ?? DB.FamilyPlacementType.Invalid;
 
+    // --- special-case: WorkPlane connection ---
+    bool isRwpi = instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance;
+    var rwpi = isRwpi ? (Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance)instance : null;
+
+    // Look up the host column by matching connection.sketchPlaneUniqueId -> column.applicationId
+    Element explicitHost = null;
+    if (isRwpi && !string.IsNullOrWhiteSpace(rwpi.sketchPlaneUniqueId))
+    {
+      explicitHost = FindHostColumnByApplicationId(rwpi.sketchPlaneUniqueId);
+      if (explicitHost == null)
+        appObj.Update(logItem: $"Host column with applicationId='{rwpi.sketchPlaneUniqueId}' not found.");
+    }
+
+    // Insertion point
+    XYZ insertionPoint;
+    if (isRwpi && explicitHost != null)
+    {
+      // Ignore incoming placement: use host center as neutral reference
+      insertionPoint = ElementCenter(explicitHost);
+    }
+    else
+    {
+      if (instance["placementPoint"] is Objects.Geometry.Point pp)
+      {
+        var u = UnitsOrModel(pp.units);
+        insertionPoint = new XYZ(
+          ScaleToNative(pp.x, u),
+          ScaleToNative(pp.y, u),
+          ScaleToNative(pp.z, u)
+        );
+      }
+      else if (instance.transform != null)
+      {
+        var t = TransformToNative(instance.transform);
+        insertionPoint = t.OfPoint(XYZ.Zero);
+      }
+      else
+      {
+        insertionPoint = XYZ.Zero;
+      }
+    }
+
     // Update existing
     if (docObj != null)
     {
@@ -1160,16 +1618,38 @@ public partial class ConverterRevit : ISpeckleConverter
         {
           familyInstance = (DB.FamilyInstance)docObj;
 
-          var newPt = new XYZ(insertionPoint.X, insertionPoint.Y, (familyInstance.Location as LocationPoint).Point.Z);
-          (familyInstance.Location as LocationPoint).Point = newPt;
+          if (isRwpi)
+          {
+            // Do NOT touch position/rotation. Ensure host matches; if not, recreate.
+            if (explicitHost != null && familyInstance.Host?.Id != explicitHost.Id)
+            {
+              Doc.Delete(docObj.Id);
+              familyInstance = null;
+            }
+            else
+            {
+              // Allow type changes
+              if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+                familyInstance.ChangeTypeId(familySymbol.Id);
+            }
+          }
+          else
+          {
+            // Your existing update behavior (position/level/type)
+            var newPt = new XYZ(insertionPoint.X, insertionPoint.Y, (familyInstance.Location as LocationPoint).Point.Z);
+            (familyInstance.Location as LocationPoint).Point = newPt;
 
-          if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
-            familyInstance.ChangeTypeId(familySymbol.Id);
+            if ((familyInstance.Location as LocationPoint).Point != newPt)
+              (familyInstance.Location as LocationPoint).Point = newPt;
 
-          TrySetParam(familyInstance, BuiltInParameter.FAMILY_LEVEL_PARAM, level);
-          TrySetParam(familyInstance, BuiltInParameter.FAMILY_BASE_LEVEL_PARAM, level);
+            if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+              familyInstance.ChangeTypeId(familySymbol.Id);
+
+            TrySetParam(familyInstance, BuiltInParameter.FAMILY_LEVEL_PARAM, level);
+            TrySetParam(familyInstance, BuiltInParameter.FAMILY_BASE_LEVEL_PARAM, level);
+          }
         }
-        isUpdate = true;
+        isUpdate = familyInstance != null;
       }
       catch (Autodesk.Revit.Exceptions.ApplicationException)
       {
@@ -1180,81 +1660,101 @@ public partial class ConverterRevit : ISpeckleConverter
     // Create new
     if (familyInstance == null)
     {
-      switch (placement)
+      if (isRwpi && explicitHost != null && placement == DB.FamilyPlacementType.WorkPlaneBased)
       {
-        case DB.FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
+        // Host by face on the column; neutral orientation (no rotation)
+        var faceRef = GetNearestPlanarFaceReference(explicitHost, insertionPoint);
+
+        if (faceRef != null)
+        {
           familyInstance = Doc.Create.NewFamilyInstance(
-            insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
-          break;
-
-        case DB.FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
+            faceRef, insertionPoint, new XYZ(0, 0, 0), familySymbol);
+        }
+        else
+        {
+          // Fallback: try generic host-based creation (might throw if not supported)
+          try
           {
-            var op = new Options { ComputeReferences = true };
-            var geomElement = CurrentHostElement.get_Geometry(op);
-            if (geomElement == null)
-            {
-              Doc.Regenerate();
-              geomElement = CurrentHostElement.get_Geometry(op);
-            }
-            if (geomElement == null) goto default;
-
-            Reference faceRef = null;
-            var planeDist = double.MaxValue;
-            GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
-
-            try
-            {
-              familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new XYZ(0, 0, 0), familySymbol);
-            }
-            catch (Autodesk.Revit.Exceptions.ApplicationException e)
-            {
-              appObj.Update(status: ApplicationObject.State.Failed,
-                            logItem: $"Could not create WorkPlaneBased hosted instance: {e.Message}");
-              return appObj;
-            }
-
-            var cutVoidsParams = familySymbol.Family.GetParameters("Cut with Voids When Loaded");
-            var lvlParams = familyInstance.GetParameters("Schedule Level");
-            if (cutVoidsParams.ElementAtOrDefault(0) != null && cutVoidsParams[0].AsInteger() == 1)
-              InstanceVoidCutUtils.AddInstanceVoidCut(Doc, CurrentHostElement, familyInstance);
-            if (lvlParams.ElementAtOrDefault(0) != null && level != null)
-              lvlParams[0].Set(level.Id);
-
-            break;
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, explicitHost, level, DB.Structure.StructuralType.NonStructural);
           }
-
-        case DB.FamilyPlacementType.WorkPlaneBased:
+          catch
           {
-            // respect work plane on payload (units may be null/'none')
-            SketchPlane sp = null;
-            if (instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance wpi)
-            {
-              if (!string.IsNullOrWhiteSpace(wpi.sketchPlaneUniqueId))
-                sp = Doc.GetElement(wpi.sketchPlaneUniqueId) as SketchPlane;
+            appObj.Update(status: ApplicationObject.State.Failed,
+                          logItem: "Could not obtain a face reference for WorkPlane hosting and fallback creation failed.");
+            return appObj;
+          }
+        }
 
-              if (sp == null && wpi.workPlane != null && wpi.workPlane.origin != null && wpi.workPlane.normal != null)
+        // Optional: set "Schedule Level" if present
+        var lvlParams = familyInstance.GetParameters("Schedule Level");
+        if (lvlParams?.Count > 0 && level != null)
+          lvlParams[0].Set(level.Id);
+      }
+      else
+      {
+        switch (placement)
+        {
+          case DB.FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
+            break;
+
+          case DB.FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
+            {
+              var op = new Options { ComputeReferences = true };
+              var geomElement = CurrentHostElement.get_Geometry(op);
+              if (geomElement == null)
               {
-                var ou = UnitsOrModel(wpi.workPlane.origin.units);
-                var n = new XYZ(wpi.workPlane.normal.x, wpi.workPlane.normal.y, wpi.workPlane.normal.z);
-                var o = new XYZ(
-                  ScaleToNative(wpi.workPlane.origin.x, ou),
-                  ScaleToNative(wpi.workPlane.origin.y, ou),
-                  ScaleToNative(wpi.workPlane.origin.z, ou));
-                var plane = DB.Plane.CreateByNormalAndOrigin(n, o);
-                sp = SketchPlane.Create(Doc, plane);
+                Doc.Regenerate();
+                geomElement = CurrentHostElement.get_Geometry(op);
               }
+              if (geomElement == null) goto default;
+
+              Reference faceRef = null;
+              var planeDist = double.MaxValue;
+              GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
+
+              familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new XYZ(0, 0, 0), familySymbol);
+
+              var lvlParams = familyInstance.GetParameters("Schedule Level");
+              if (lvlParams?.Count > 0 && level != null) lvlParams[0].Set(level.Id);
+
+              break;
             }
 
-            familyInstance = (sp != null)
-              ? Doc.Create.NewFamilyInstance(insertionPoint, familySymbol, sp, DB.Structure.StructuralType.NonStructural)
-              : Doc.Create.NewFamilyInstance(insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
-            break;
-          }
+          case DB.FamilyPlacementType.WorkPlaneBased:
+            {
+              SketchPlane sp = null;
+              if (instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance wpi)
+              {
+                if (!string.IsNullOrWhiteSpace(wpi.sketchPlaneUniqueId))
+                  sp = Doc.GetElement(wpi.sketchPlaneUniqueId) as SketchPlane;
 
-        default:
-          familyInstance = Doc.Create.NewFamilyInstance(
-            insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
-          break;
+                if (sp == null && wpi.workPlane != null && wpi.workPlane.origin != null && wpi.workPlane.normal != null)
+                {
+                  var ou = UnitsOrModel(wpi.workPlane.origin.units);
+                  var n = new XYZ(wpi.workPlane.normal.x, wpi.workPlane.normal.y, wpi.workPlane.normal.z);
+                  var o = new XYZ(
+                    ScaleToNative(wpi.workPlane.origin.x, ou),
+                    ScaleToNative(wpi.workPlane.origin.y, ou),
+                    ScaleToNative(wpi.workPlane.origin.z, ou));
+                  var plane = DB.Plane.CreateByNormalAndOrigin(n, o);
+                  sp = SketchPlane.Create(Doc, plane);
+                }
+              }
+
+              familyInstance = (sp != null)
+                ? Doc.Create.NewFamilyInstance(insertionPoint, familySymbol, sp, DB.Structure.StructuralType.NonStructural)
+                : Doc.Create.NewFamilyInstance(insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+              break;
+            }
+
+          default:
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+            break;
+        }
       }
     }
 
@@ -1266,62 +1766,68 @@ public partial class ConverterRevit : ISpeckleConverter
 
     Doc.Regenerate(); // required for mirror/flip/rotation to behave
 
-    // Mirror
-    if (instance.mirrored != familyInstance.Mirrored)
+    if (!isRwpi)
     {
-      Group group = null;
-      try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
-      catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
-
-      var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
-      try
+      // Mirror
+      if (instance.mirrored != familyInstance.Mirrored)
       {
-        ElementTransformUtils.MirrorElements(
-          Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(XYZ.BasisY, insertionPoint), false);
-      }
-      catch (Autodesk.Revit.Exceptions.ApplicationException e)
-      {
-        appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
-      }
-      group?.UngroupMembers();
-    }
+        Group group = null;
+        try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
+        catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
 
-    // Flip
-    if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped)
-      familyInstance.flipHand();
-    if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped)
-      familyInstance.flipFacing();
-
-    // Rotation
-    if (instance["rotation"] is double rot && Math.Abs(rot) > 1e-9 && familyInstance.Location is LocationPoint lp1)
-    {
-      var axis = DB.Line.CreateUnbound(lp1.Point, XYZ.BasisZ);
-      try { ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, rot); }
-      catch (Autodesk.Revit.Exceptions.ApplicationException e)
-      { appObj.Update(logItem: $"Could not rotate instance: {e.Message}"); }
-    }
-    else if (instance.transform != null && familyInstance.Location is LocationPoint lp2)
-    {
-      var desired = TransformToNative(instance.transform);
-      var current = familyInstance.GetTotalTransform();
-      XYZ dX = desired.BasisX, cX = current.BasisX, cZ = current.BasisZ;
-      var cross = cX.CrossProduct(dX);
-      var dot = cX.DotProduct(dX);
-      var rotZ = Math.Atan2(cross.DotProduct(cZ), dot);
-      if (Math.Abs(rotZ) > 1e-9)
-      {
-        var axis = DB.Line.CreateUnbound(lp2.Point, cZ);
-        try { ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, -rotZ); }
+        var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
+        try
+        {
+          ElementTransformUtils.MirrorElements(
+            Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(XYZ.BasisY, insertionPoint), false);
+        }
         catch (Autodesk.Revit.Exceptions.ApplicationException e)
-        { appObj.Update(logItem: $"Could not rotate created instance: {e.Message}"); }
+        {
+          appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
+        }
+        group?.UngroupMembers();
+      }
+
+      // Flip
+      if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped)
+        familyInstance.flipHand();
+      if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped)
+        familyInstance.flipFacing();
+
+      // Rotation
+      if (instance["rotation"] is double rot && Math.Abs(rot) > 1e-9 && familyInstance.Location is LocationPoint lp1)
+      {
+        var axis = DB.Line.CreateUnbound(lp1.Point, XYZ.BasisZ);
+        try { ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, rot); }
+        catch (Autodesk.Revit.Exceptions.ApplicationException e)
+        { appObj.Update(logItem: $"Could not rotate instance: {e.Message}"); }
+      }
+      else if (instance.transform != null && familyInstance.Location is LocationPoint lp2)
+      {
+        var desired = TransformToNative(instance.transform);
+        var current = familyInstance.GetTotalTransform();
+        XYZ dX = desired.BasisX, cX = current.BasisX, cZ = current.BasisZ;
+        var cross = cX.CrossProduct(dX);
+        var dot = cX.DotProduct(dX);
+        var rotZ = Math.Atan2(cross.DotProduct(cZ), dot);
+        if (Math.Abs(rotZ) > 1e-9)
+        {
+          var axis = DB.Line.CreateUnbound(lp2.Point, cZ);
+          try { ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, -rotZ); }
+          catch (Autodesk.Revit.Exceptions.ApplicationException e)
+          { appObj.Update(logItem: $"Could not rotate created instance: {e.Message}"); }
+        }
       }
     }
+    // else: RWPI → intentionally do nothing about position or rotation
 
     SetInstanceParameters(familyInstance, instance);
     var state = isUpdate ? ApplicationObject.State.Updated : ApplicationObject.State.Created;
     appObj.Update(status: state, createdId: familyInstance.UniqueId, convertedItem: familyInstance);
     return appObj;
   }
+
+*/
 
 
 
@@ -1449,7 +1955,38 @@ public partial class ConverterRevit : ISpeckleConverter
 
   public List<Base> ConvertToSpeckle(List<object> objects) => objects.Select(ConvertToSpeckle).ToList();
 
-  public List<object> ConvertToNative(List<Base> objects) => objects.Select(ConvertToNative).ToList();
+  public List<object> ConvertToNative(List<Base> objects)
+  {
+    if (objects == null || objects.Count == 0)
+      return new List<object>();
+
+    static bool IsDeferred(Base b)
+    {
+      if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance) return true;
+
+      // Handle @SpeckleSchema wrapper
+      var schema = b?["@SpeckleSchema"] as Base;
+      return schema is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance;
+    }
+
+    var immediate = new List<Base>(objects.Count);
+    var deferred = new List<Base>();
+
+    foreach (var b in objects)
+    {
+      if (b == null) continue;
+      if (IsDeferred(b)) deferred.Add(b);
+      else immediate.Add(b);
+    }
+
+    var results = new List<object>(objects.Count);
+
+    // Use lambdas to avoid overload ambiguity
+    results.AddRange(immediate.Select(b => ConvertToNative(b)));
+    results.AddRange(deferred.Select(b => ConvertToNative(b)));
+
+    return results;
+  }
 
   public bool CanConvertToSpeckle(object @object)
   {
