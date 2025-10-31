@@ -29,5 +29,8 @@ namespace Objects.BuiltElements.Revit
     public OG.Vector handOrientation { get; set; }
     public OG.Point placementPoint { get; set; }
     public new List<OG.Mesh> displayValue { get; set; }
+
+    public bool flipVertical { get; set; } // mirror across XY (Z -> -Z) at insertion point
+
   }
 }

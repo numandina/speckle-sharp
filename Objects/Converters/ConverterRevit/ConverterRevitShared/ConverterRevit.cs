@@ -1113,6 +1113,7 @@ public partial class ConverterRevit : ISpeckleConverter
         return null;
     }
   }
+  // inside RevitInstanceToNative(...) after you've got `familyInstance` and called Doc.Regenerate()
 
   public object ConvertToNativeDisplayable(Base @base)
   {
@@ -1123,8 +1124,48 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     return nativeObject;
   }
+
+
+
+
+
+
+
   public ApplicationObject RevitInstanceToNative(Objects.Other.Revit.RevitInstance instance, ApplicationObject appObj = null)
   {
+    // --- local helpers to read dynamic/typed flags safely ---
+    static bool TryGetDynBool(Base b, string key, out bool value)
+    {
+      value = false;
+      if (b == null) return false;
+      if (!b.GetMembers(Speckle.Core.Models.DynamicBaseMemberType.All).TryGetValue(key, out var raw) || raw == null)
+        return false;
+
+      switch (raw)
+      {
+        case bool bb: value = bb; return true;
+        case string s when bool.TryParse(s, out var bv): value = bv; return true;
+        case string s2 when int.TryParse(s2, out var iv): value = iv != 0; return true;
+        case int i: value = i != 0; return true;
+        case long l: value = l != 0; return true;
+        case double d: value = Math.Abs(d) > 1e-9; return true;
+        default: return false;
+      }
+    }
+    static bool WantsVerticalFlip(Base b)
+    {
+      bool typed = false, hasTyped = false;
+      if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
+      {
+        typed = rwpi.flipVertical; // if the local kit has the property
+        hasTyped = true;
+      }
+      if (TryGetDynBool(b, "flipVertical", out var dyn))
+        return dyn;
+      return hasTyped && typed;
+    }
+    // --------------------------------------------------------
+
     DB.FamilyInstance familyInstance = null;
     var docObj = GetExistingElementByApplicationId(instance?.applicationId);
     appObj ??= new ApplicationObject(instance?.id, instance?.speckle_type) { applicationId = instance?.applicationId };
@@ -1194,8 +1235,8 @@ public partial class ConverterRevit : ISpeckleConverter
 
     // ---- yaw (radians) from payload ----
     double? yawRad = null;
-    if (instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
-      yawRad = rwpi.rotation;
+    if (instance is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi0)
+      yawRad = rwpi0.rotation;
     if (!yawRad.HasValue && instance["rotation"] is double rotVal)
       yawRad = rotVal;
 
@@ -1204,14 +1245,13 @@ public partial class ConverterRevit : ISpeckleConverter
              $"hasPlacementPoint:{hasPlacementPoint} hasTransform:{hasTransform} WPBased:{isWorkPlaneBased} yaw(rad):{(yawRad?.ToString() ?? "<none>")}");
 
     // ---------------- Insertion point (external -> internal) ----------------
-    // Important: apply docT only if we USED placementPoint (not just because transform exists).
-    XYZ insertionExt;       // external/shared coords after unit scale OR internal if from transform
+    XYZ insertionExt;
     bool usedPlacementPoint = false;
 
     if (hasPlacementPoint)
     {
       var pp = (Objects.Geometry.Point)instance["placementPoint"];
-      var u = UnitsOrModel(pp.units); // "m" from Unity sender
+      var u = UnitsOrModel(pp.units);
       insertionExt = new XYZ(
         ScaleToNative(pp.x, u),
         ScaleToNative(pp.y, u),
@@ -1222,23 +1262,20 @@ public partial class ConverterRevit : ISpeckleConverter
     }
     else if (hasTransform)
     {
-      var t = TransformToNative(instance.transform); // already applies doc ref transform
-      insertionExt = t.OfPoint(XYZ.Zero);            // this is INTERNAL already
+      var t = TransformToNative(instance.transform);
+      insertionExt = t.OfPoint(XYZ.Zero);
       usedPlacementPoint = false;
       DebugLog($"[RVTIN] insertion from transform (already internal): {insertionExt}");
     }
     else
     {
       insertionExt = XYZ.Zero;
-      usedPlacementPoint = true; // treat Zero as external so docT is applied (harmless if identity)
+      usedPlacementPoint = true;
       DebugLog($"[RVTIN] no point/transform -> using ZERO external");
     }
 
     var docT = GetDocReferencePointTransform(Doc);
-    DebugLog($"[RVTIN] docT: O={docT.Origin} X={docT.BasisX} Y={docT.BasisY} Z={docT.BasisZ}");
-
     var insertionPoint = usedPlacementPoint ? docT.OfPoint(insertionExt) : insertionExt;
-    DebugLog($"[RVTIN] insertionPoint INTERNAL = {(usedPlacementPoint ? "docT.OfPoint(external)" : "internal from transform")} -> {insertionPoint}");
 
     // ---------------- UPDATE PATH ----------------
     if (docObj != null)
@@ -1285,7 +1322,6 @@ public partial class ConverterRevit : ISpeckleConverter
       catch (Autodesk.Revit.Exceptions.ApplicationException ex)
       {
         DebugLog($"[RVTIN] Update path threw, will recreate. {ex.GetType().Name}: {ex.Message}");
-        // fall-through
       }
     }
 
@@ -1297,7 +1333,6 @@ public partial class ConverterRevit : ISpeckleConverter
         DB.ReferencePlane rp = null;
         DB.SketchPlane sp = null;
 
-        // a non-template plan view for RP creation
         DB.View viewForRp = Doc.ActiveView;
         if (viewForRp == null || viewForRp.IsTemplate)
         {
@@ -1306,23 +1341,19 @@ public partial class ConverterRevit : ISpeckleConverter
                       .Cast<DB.ViewPlan>()
                       .FirstOrDefault(v => !v.IsTemplate);
         }
-        if (viewForRp == null)
-          DebugLog("[RVTIN] No suitable ViewPlan found for ReferencePlane; will still try.");
 
         try
         {
-          var origin = insertionPoint;        // INTERNAL
           var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, yawRad ?? 0.0);
-          var yDir = rotT.OfVector(DB.XYZ.BasisY);           // rotate Y around Z by yaw
-          var bubble = origin;                                  // start
-          var free = origin + yDir;                           // along rotated Y
-          var cut = DB.XYZ.BasisZ;                           // up; normal = (free-bubble) x cut
+          var yDir = rotT.OfVector(DB.XYZ.BasisY);
+          var bubble = insertionPoint;
+          var free = insertionPoint + yDir;
+
+          // we no longer try to flip by changing plane normal; rotation will handle flip
+          var cut = DB.XYZ.BasisZ;
 
           rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
-
-          var guid8 = Guid.NewGuid().ToString("N").Substring(0, 8);
-          rp.Name = $"SPK_{guid8}";
-          DebugLog($"[RVTIN] RP id:{rp.Id.IntegerValue} name:'{rp.Name}' at {origin}  yaw(rad):{(yawRad ?? 0.0):0.###}");
+          rp.Name = $"SPK_{Guid.NewGuid():N}".Substring(0, 8);
         }
         catch (Exception ex)
         {
@@ -1334,13 +1365,12 @@ public partial class ConverterRevit : ISpeckleConverter
 #if REVIT2019 || REVIT2020 || REVIT2021 || REVIT2022 || REVIT2023 || REVIT2024 || REVIT2025
           sp = (rp != null)
                ? DB.SketchPlane.Create(Doc, rp.Id)
-               : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint)); // vertical fallback
+               : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
 #else
         sp = (rp != null)
              ? DB.SketchPlane.Create(Doc, rp)
              : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
 #endif
-          DebugLog($"[RVTIN] SP id:{sp?.Id.IntegerValue} {(rp != null ? "(from RP)" : "(raw Plane)")}");
         }
         catch (Exception ex)
         {
@@ -1356,10 +1386,6 @@ public partial class ConverterRevit : ISpeckleConverter
 
             var skParam = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM);
             if (skParam != null && !skParam.IsReadOnly) skParam.Set(sp.Id);
-
-            var skId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId()?.IntegerValue;
-            var spName = (skId.HasValue && skId.Value > 0) ? (Doc.GetElement(new ElementId(skId.Value)) as DB.SketchPlane)?.Name : "<none>";
-            DebugLog($"[RVTIN] Placed on SP. host:{familyInstance.Host?.Id.IntegerValue} SKETCH_PLANE_PARAM:{(skId > 0 ? skId.ToString() : "<none>")} name:{spName}");
           }
           catch (Exception ex)
           {
@@ -1369,7 +1395,6 @@ public partial class ConverterRevit : ISpeckleConverter
 
         if (familyInstance == null)
         {
-          DebugLog("[RVTIN] Fallback: place by level (no SketchPlane).");
           try
           {
             familyInstance = Doc.Create.NewFamilyInstance(
@@ -1383,13 +1408,11 @@ public partial class ConverterRevit : ISpeckleConverter
       }
       else
       {
-        // non-WP-based legacy path
         switch (placement)
         {
           case DB.FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
             familyInstance = Doc.Create.NewFamilyInstance(
               insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
-            DebugLog($"[RVTIN] Created hosted on CurrentHostElement:{CurrentHostElement?.Id.IntegerValue}");
             break;
 
           case DB.FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
@@ -1408,7 +1431,6 @@ public partial class ConverterRevit : ISpeckleConverter
               GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
 
               familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new DB.XYZ(0, 0, 0), familySymbol);
-              DebugLog($"[RVTIN] WP-based on face of CurrentHostElement:{CurrentHostElement?.Id.IntegerValue}");
 
               var lvlParams = familyInstance.GetParameters("Schedule Level");
               if (lvlParams?.Count > 0 && level != null) lvlParams[0].Set(level.Id);
@@ -1418,7 +1440,6 @@ public partial class ConverterRevit : ISpeckleConverter
           default:
             familyInstance = Doc.Create.NewFamilyInstance(
               insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
-            DebugLog($"[RVTIN] Created default (no explicit host).");
             break;
         }
       }
@@ -1427,14 +1448,96 @@ public partial class ConverterRevit : ISpeckleConverter
     if (familyInstance == null)
     {
       appObj.Update(status: ApplicationObject.State.Failed, logItem: "Could not create instance.");
-      DebugLog("[RVTIN] FAIL: familyInstance is null after all strategies.");
       return appObj;
     }
 
     Doc.Regenerate();
 
-    // ---- Rotation handling ----
-    // WP-based: plane already carries yaw; do NOT rotate instance.
+
+/*//    Tilt the clip vertically by 90° (axis lies in the work plane):
+
+TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
+
+
+    // Quarter - turn in plan(spin around Z):
+
+    TryRotate90(Doc, familyInstance, AxisKind.WorldZ, DebugLog);
+
+
+    //Roll 90° around the instance’s own “up”:
+
+    TryRotate90(Doc, familyInstance, AxisKind.InstanceZ, DebugLog);
+*/
+
+
+    var shouldFlip = WantsVerticalFlip(instance);
+
+    if (shouldFlip && familyInstance?.Location is DB.LocationPoint lp)
+    {
+      using (var st = new DB.SubTransaction(Doc))
+      {
+        st.Start();
+
+        bool rePin = false;
+        try { if (familyInstance.Pinned) { familyInstance.Pinned = false; rePin = true; } }
+        catch (Exception ex) { DebugLog($"[VFlip] Unpin failed: {ex.Message}"); }
+
+        // Horizontal plane through insertion point (normal = WORLD Z) -> flips up/down
+        var plane = DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisZ, lp.Point);
+
+        try
+        {
+          DB.ElementTransformUtils.MirrorElements(
+            Doc,
+            new List<DB.ElementId> { familyInstance.Id },
+            plane,
+            false // mirrorCopies
+          );
+          DebugLog("[VFlip] Mirrored across world-Z (horizontal) plane.");
+        }
+        catch (Exception ex)
+        {
+          DebugLog($"[VFlip] MirrorElements failed: {ex.GetType().Name}: {ex.Message}");
+
+          // Fallback: 180° rotate around a WORLD-HORIZONTAL axis through the insertion point
+          try
+          {
+            var axis = DB.Line.CreateUnbound(lp.Point, DB.XYZ.BasisX); // BasisY also works
+            DB.ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, Math.PI);
+            DebugLog("[VFlip] Fallback 180° rotate around world X succeeded.");
+          }
+          catch (Exception ex2)
+          {
+            DebugLog($"[VFlip] Fallback rotate failed: {ex2.GetType().Name}: {ex2.Message}");
+          }
+        }
+
+        // Try to re-add void cut (common for structural connections) and log outcome
+        try
+        {
+          var hostElem = familyInstance.Host as DB.Element;
+          if (hostElem != null)
+          {
+            DB.InstanceVoidCutUtils.AddInstanceVoidCut(Doc, hostElem, familyInstance);
+            DebugLog("[VFlip] AddInstanceVoidCut attempted.");
+          }
+          else
+          {
+            DebugLog("[VFlip] No host to cut.");
+          }
+        }
+        catch (Exception ex) { DebugLog($"[VFlip] AddInstanceVoidCut failed: {ex.Message}"); }
+
+        try { if (rePin) familyInstance.Pinned = true; }
+        catch (Exception ex) { DebugLog($"[VFlip] Re-pin failed: {ex.Message}"); }
+
+        st.Commit();
+      }
+    }
+
+
+
+
     if (!isWorkPlaneBased)
     {
       if (yawRad.HasValue && Math.Abs(yawRad.Value) > 1e-9 && familyInstance.Location is DB.LocationPoint lpt)
@@ -1443,7 +1546,6 @@ public partial class ConverterRevit : ISpeckleConverter
         try
         {
           DB.ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, yawRad.Value);
-          DebugLog($"[RVTIN] Applied yaw to non-WP family: {yawRad.Value} rad ({yawRad.Value * 180.0 / Math.PI:0.###}°)");
         }
         catch (Autodesk.Revit.Exceptions.ApplicationException e)
         {
@@ -1451,12 +1553,8 @@ public partial class ConverterRevit : ISpeckleConverter
         }
       }
     }
-    else
-    {
-      DebugLog("[RVTIN] WP-based: plane carries yaw; skipped instance rotation.");
-    }
 
-    // flips/mirror kept
+    // Hand / Facing / standard mirror
     if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped) familyInstance.flipHand();
     if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped) familyInstance.flipFacing();
     if (instance.mirrored != familyInstance.Mirrored)
@@ -1478,7 +1576,7 @@ public partial class ConverterRevit : ISpeckleConverter
       group?.UngroupMembers();
     }
 
-    // diagnostics: host & work plane & final location
+    // diagnostics
     var hostId = familyInstance.Host?.Id.IntegerValue;
     var skPlaneId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
     var skPlaneStr = (skPlaneId != null && skPlaneId.IntegerValue > 0) ? $"{skPlaneId.IntegerValue}" : "<none>";
@@ -1494,6 +1592,189 @@ public partial class ConverterRevit : ISpeckleConverter
     appObj.Update(status: state, createdId: familyInstance.UniqueId, convertedItem: familyInstance);
     return appObj;
   }
+
+
+
+
+
+
+
+
+
+
+
+  private static bool TryGetDynBool(Base b, string key, out bool value)
+  {
+    value = false;
+    if (b == null) return false;
+    if (!b.GetMembers(Speckle.Core.Models.DynamicBaseMemberType.All).TryGetValue(key, out var raw) || raw == null)
+      return false;
+
+    switch (raw)
+    {
+      case bool bb: value = bb; return true;
+      case string s when bool.TryParse(s, out var bv): value = bv; return true;
+      case string s2 when int.TryParse(s2, out var iv): value = iv != 0; return true;
+      case int i: value = i != 0; return true;
+      case long l: value = l != 0; return true;
+      case double d: value = Math.Abs(d) > 1e-9; return true;
+      default: return false;
+    }
+  }
+
+  /// Read from typed prop if present, otherwise from dynamic.
+  /// Works even if your Speckle.Objects in Revit doesn’t have the new property.
+  private static bool WantsVerticalFlip(Base b)
+  {
+    bool typed = false, hasTyped = false;
+    if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
+    {
+      // If your local kit defines the property, this compiles and returns the value.
+      typed = rwpi.flipVertical;
+      hasTyped = true;
+    }
+
+    // Prefer dynamic if it exists (the viewer proves it does).
+    if (TryGetDynBool(b, "flipVertical", out var dyn))
+      return dyn;
+
+    // Fall back to typed (or false if not present).
+    return hasTyped && typed;
+  }
+  private enum AxisKind
+  {
+    WorldZ,     // yaw in plan
+    WorldX,     // tilt around world X
+    WorldY,     // tilt around world Y
+    InPlaneX,   // axis = work-plane XVec (good for vertical tilt)
+    InPlaneY,   // axis = work-plane YVec (good for vertical tilt)
+    InstanceZ   // axis = fi local BasisZ (roll around its up)
+  }
+
+  private bool TryRotate90(Document doc, DB.FamilyInstance fi, AxisKind axisKind, Action<string> log)
+  {
+    if (fi == null) return false;
+
+    // pivot: insertion point if we have one, else element center
+    XYZ pivot = (fi.Location is DB.LocationPoint lp) ? lp.Point :
+                ((fi.get_BoundingBox(null) is BoundingBoxXYZ bb) ? (bb.Min + bb.Max) * 0.5 : XYZ.Zero);
+
+    // resolve axis direction
+    XYZ axisDir;
+    switch (axisKind)
+    {
+      case AxisKind.WorldZ: axisDir = DB.XYZ.BasisZ; break;
+      case AxisKind.WorldX: axisDir = DB.XYZ.BasisX; break;
+      case AxisKind.WorldY: axisDir = DB.XYZ.BasisY; break;
+      case AxisKind.InstanceZ:
+        axisDir = fi.GetTotalTransform().BasisZ;
+        if (axisDir == null || axisDir.IsZeroLength()) axisDir = DB.XYZ.BasisZ;
+        break;
+      case AxisKind.InPlaneX:
+      case AxisKind.InPlaneY:
+      default:
+        {
+          // Try sketch plane first
+          var spId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
+          var sp = (spId != null && spId.IntegerValue > 0) ? doc.GetElement(spId) as DB.SketchPlane : null;
+          if (sp != null)
+          {
+            var pl = sp.GetPlane();
+            axisDir = (axisKind == AxisKind.InPlaneX ? pl.XVec : pl.YVec);
+          }
+          else
+          {
+            // Fallback to instance local bases
+            var t = fi.GetTotalTransform();
+            axisDir = (axisKind == AxisKind.InPlaneX ? t.BasisX : t.BasisY);
+          }
+          if (axisDir == null || axisDir.IsZeroLength()) axisDir = DB.XYZ.BasisX;
+        }
+        break;
+    }
+    axisDir = axisDir.Normalize();
+
+    using var st = new DB.SubTransaction(doc);
+    st.Start();
+
+    // unpin if needed
+    bool rePin = false;
+    try { if (fi.Pinned) { fi.Pinned = false; rePin = true; } }
+    catch (Exception ex) { log($"[R90] Unpin failed: {ex.Message}"); }
+
+    try
+    {
+      var axis = DB.Line.CreateUnbound(pivot, axisDir);
+      DB.ElementTransformUtils.RotateElement(doc, fi.Id, axis, Math.PI / 2.0); // 90°
+      log("[R90] RotateElement 90° succeeded.");
+    }
+    catch (Exception ex)
+    {
+      log($"[R90] RotateElement failed: {ex.GetType().Name}: {ex.Message}");
+      try { if (rePin) fi.Pinned = true; } catch { }
+      st.RollBack();
+      return false;
+    }
+
+    // Some hosted connection families lose void cut after transforms—reapply if possible
+    try
+    {
+      var host = fi.Host as DB.Element;
+      if (host != null)
+      {
+        DB.InstanceVoidCutUtils.AddInstanceVoidCut(doc, host, fi);
+        log("[R90] AddInstanceVoidCut attempted.");
+      }
+      else log("[R90] No host to cut.");
+    }
+    catch (Exception ex) { log($"[R90] AddInstanceVoidCut failed: {ex.Message}"); }
+
+    // re-pin
+    try { if (rePin) fi.Pinned = true; }
+    catch (Exception ex) { log($"[R90] Re-pin failed: {ex.Message}"); }
+
+    st.Commit();
+    return true;
+  }
+
+
+  private void RotateAsVerticalFlip(DB.FamilyInstance fi, XYZ pivot, bool usePlaneX = true)
+  {
+    // Try to use the instance's sketch plane orientation
+    XYZ dir = null;
+
+    var skId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
+    var sp = (skId != null && skId.IntegerValue > 0) ? Doc.GetElement(skId) as DB.SketchPlane : null;
+
+    if (sp != null)
+    {
+      var pl = sp.GetPlane();
+      // axis in the host plane: XVec or YVec
+      dir = (usePlaneX ? pl.XVec : pl.YVec);
+    }
+
+    // Fallback: use the instance’s local bases (still in model coords)
+    if (dir == null || dir.IsZeroLength())
+    {
+      var t = fi.GetTotalTransform();
+      dir = (usePlaneX ? t.BasisX : t.BasisY);
+    }
+
+    // Final fallback: world X
+    if (dir == null || dir.IsZeroLength()) dir = DB.XYZ.BasisX;
+
+    var axis = DB.Line.CreateUnbound(pivot, dir.Normalize());
+
+    using (var st = new DB.SubTransaction(Doc))
+    {
+      st.Start();
+      DB.ElementTransformUtils.RotateElement(Doc, fi.Id, axis, Math.PI); // 180°
+      st.Commit();
+    }
+  }
+
+
+
 
   // old
   /*
@@ -1986,6 +2267,68 @@ public partial class ConverterRevit : ISpeckleConverter
     results.AddRange(deferred.Select(b => ConvertToNative(b)));
 
     return results;
+  }
+
+
+  /// Rotate 180° around an in-plane axis through the given pivot point.
+  private static void RotateInstance180InPlane(Document doc, DB.FamilyInstance fi, XYZ pivot, bool usePlaneX = true)
+  {
+    var dir = ResolveInPlaneAxis(fi, usePlaneX);
+    var axis = DB.Line.CreateUnbound(pivot, dir);
+
+    using (var st = new SubTransaction(doc))
+    {
+      st.Start();
+      ElementTransformUtils.RotateElement(doc, fi.Id, axis, Math.PI); // 180 degrees
+      st.Commit();
+    }
+  }
+  private static SketchPlane TryGetSketchPlane(DB.FamilyInstance fi)
+  {
+    var id = fi.get_Parameter(BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
+    return (id != null && id.IntegerValue > 0) ? fi.Document.GetElement(id) as SketchPlane : null;
+  }
+
+  private static XYZ ResolveInPlaneAxis(DB.FamilyInstance fi, bool usePlaneX = true)
+  {
+    var sp = TryGetSketchPlane(fi);
+    if (sp != null)
+    {
+      var pl = sp.GetPlane();
+      var d = usePlaneX ? pl.XVec : pl.YVec;
+      if (d != null && !d.IsZeroLength()) return d.Normalize();
+    }
+    var t = fi.GetTotalTransform();
+    var alt = usePlaneX ? t.BasisX : t.BasisY;
+    return (alt != null && !alt.IsZeroLength()) ? alt.Normalize() : XYZ.BasisX;
+  }
+
+  private static void VerticalFlipSimple(Document doc, DB.FamilyInstance fi, bool usePlaneX = true)
+  {
+    if (fi?.Location is not LocationPoint lp) return;
+
+    // cache an editable offset param (work-plane based uses FREE_HOST_OFFSET, others use ELEVATION)
+    DB.Parameter target = fi.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM);
+    if (target is null || target.IsReadOnly)
+      target = fi.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
+
+    double? oldOffset = (target != null) ? (double?)target.AsDouble() : null;
+
+    var axis = DB.Line.CreateUnbound(lp.Point, ResolveInPlaneAxis(fi, usePlaneX));
+
+    using (var st = new SubTransaction(doc))
+    {
+      st.Start();
+
+      // 1) rotate 180°
+      ElementTransformUtils.RotateElement(doc, fi.Id, axis, Math.PI);
+
+      // 2) flip the offset sign so the part ends up on the visible side of the host
+      if (oldOffset.HasValue && target is { IsReadOnly: false })
+        target.Set(-oldOffset.Value);
+
+      st.Commit();
+    }
   }
 
   public bool CanConvertToSpeckle(object @object)
