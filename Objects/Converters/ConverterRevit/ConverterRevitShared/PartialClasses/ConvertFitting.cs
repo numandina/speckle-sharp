@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using ConverterRevitShared.Extensions;
+using RevitSharedResources.Helpers.Extensions;
 using Objects.BuiltElements.Revit;
 using Speckle.Core.Kits;
 using Speckle.Core.Logging;
@@ -38,7 +39,7 @@ public partial class ConverterRevit
       out bool isExactMatch
     );
 
-    if (isExactMatch && familyInstance.Symbol.Id.IntegerValue != familySymbol.Id.IntegerValue)
+    if (isExactMatch && familyInstance.Symbol.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
     {
       familyInstance.ChangeTypeId(familySymbol.Id);
     }

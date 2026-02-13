@@ -29,7 +29,7 @@ public static class Extensions
     }
     // TODO: Should this be filtering using the Supported categories list instead?
     // exclude specific unwanted categories
-    if (((BuiltInCategory)e.Category.Id.IntegerValue) == BuiltInCategory.OST_HVAC_Zones)
+    if (((BuiltInCategory)e.Category.Id.GetIntegerValue()) == BuiltInCategory.OST_HVAC_Zones)
     {
       return false;
     }
@@ -46,12 +46,12 @@ public static class Extensions
   /// <remarks>This function will never throw, returning false instead</remarks>
   public static bool HasCategory(this IEnumerable<BuiltInCategory> categories, Category category)
   {
-    if (category?.Id?.IntegerValue is not int categoryInt)
+    if (category?.Id is not { } categoryId)
     {
       return false;
     }
 
-    return categories.Select(x => (int)x).Contains(categoryInt);
+    return categories.Select(x => (int)x).Contains(categoryId.GetIntegerValue());
   }
 
   /// <summary>
@@ -66,7 +66,7 @@ public static class Extensions
       category.CategoryType == CategoryType.Model
       || category.CategoryType == CategoryType.AnalyticalModel
       || category.CategoryType == CategoryType.Internal
-      || category.Id.IntegerValue == -2000220
+      || category.Id.GetIntegerValue() == -2000220
     ) // Grids
     {
       return true;

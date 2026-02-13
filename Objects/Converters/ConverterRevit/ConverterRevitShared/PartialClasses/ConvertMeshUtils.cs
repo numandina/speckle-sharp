@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
+using RevitSharedResources.Helpers.Extensions;
 using Speckle.Core.Logging;
 using DB = Autodesk.Revit.DB;
 using Mesh = Objects.Geometry.Mesh;
@@ -249,7 +250,7 @@ public partial class ConverterRevit
 
     if (
       graphicStyle != null
-      && graphicStyle.GraphicsStyleCategory.Id.IntegerValue == (int)(BuiltInCategory.OST_LightingFixtureSource)
+      && graphicStyle.GraphicsStyleCategory.Id.GetIntegerValue() == (int)(BuiltInCategory.OST_LightingFixtureSource)
     )
     {
       return true;

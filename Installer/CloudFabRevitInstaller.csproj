@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <AssemblyName>CloudFabRevitInstaller</AssemblyName>
+    <RootNamespace>CloudFabRevitInstaller</RootNamespace>
+    <!-- Build script passes -p:RevitVersion=2025 -->
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2025</RevitVersion>
+    <!-- Exclude from solution-wide builds and kit folder copies -->
+    <CopyToKitFolder>false</CopyToKitFolder>
+    <IsDesktopBuild>false</IsDesktopBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="RevitVersion" Value="$(RevitVersion)" />
+  </ItemGroup>
+</Project>

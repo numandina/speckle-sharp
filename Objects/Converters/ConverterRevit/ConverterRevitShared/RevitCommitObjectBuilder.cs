@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.DB;
 using Objects.Converter.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using RevitSharedResources.Interfaces;
 using Speckle.Core.Models;
 
@@ -246,7 +247,7 @@ public sealed class RevitCommitObjectBuilder : CommitObjectBuilder<Element>, IRe
   /// <returns></returns>
   public static string GetEnglishCategoryName(Category category)
   {
-    var builtInCategory = (BuiltInCategory)category.Id.IntegerValue;
+    var builtInCategory = (BuiltInCategory)category.Id.GetIntegerValue();
     var builtInCategoryName = builtInCategory
       .ToString()
       .Replace("OST_IOS", "") //for OST_IOSModelGroups

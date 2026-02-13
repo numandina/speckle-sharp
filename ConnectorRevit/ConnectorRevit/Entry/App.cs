@@ -74,6 +74,12 @@ public class App : IExternalApplication
 
       InitializeUiPanel(application);
 
+      // Confirms the correct build is loaded
+      new TaskDialog("CloudFab Speckle")
+      {
+        MainContent = $"CloudFab Speckle plugin loaded.\nBuild: {File.GetLastWriteTime(typeof(App).Assembly.Location):yyyy-MM-dd HH:mm:ss}"
+      }.Show();
+
       return Result.Succeeded;
     }
     catch (TypeLoadException ex)
@@ -132,6 +138,8 @@ public class App : IExternalApplication
     return "2024";
 #elif REVIT2025
     return "2025";
+#elif REVIT2026
+    return "2026";
 #endif
   }
 

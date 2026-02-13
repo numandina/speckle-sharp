@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Objects.Converter.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using RevitSharedResources.Models;
 using Speckle.Core.Models;
 using Xunit;
@@ -119,7 +120,7 @@ internal static class SpeckleUtils
 
     if (param == null)
     {
-      //throw new Exception($"Element of type {element.GetType()} with Id {element.Id.IntegerValue} does not have the parameter \"SpeckleObjectTestNumber\". If you are trying to create a new test document, then start from the \"blank.rvt\" file.");
+      //throw new Exception($"Element of type {element.GetType()} with Id {element.Id.GetIntegerValue()} does not have the parameter \"SpeckleObjectTestNumber\". If you are trying to create a new test document, then start from the \"blank.rvt\" file.");
       return 0;
     }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using RevitSharedResources.Helpers.Extensions;
 using RevitSharedResources.Interfaces;
 
 namespace RevitSharedResources.Helpers;
@@ -31,7 +32,7 @@ public class RevitCategoryInfo : IRevitCategoryInfo
 
   public bool ContainsRevitCategory(Category category)
   {
-    return BuiltInCategories.Select(x => (int)x).Contains(category.Id.IntegerValue);
+    return BuiltInCategories.Select(x => (int)x).Contains(category.Id.GetIntegerValue());
   }
 
   public List<ElementType> GetElementTypes(Document document)

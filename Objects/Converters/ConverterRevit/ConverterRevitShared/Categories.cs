@@ -1,6 +1,7 @@
 using System;
 using Autodesk.Revit.DB;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 
 namespace Objects.Converter.Revit;
 
@@ -49,7 +50,7 @@ public static class Categories
   public static BuiltInCategory GetBuiltInCategory(Category category)
   {
 #if REVIT2020 || REVIT2021 || REVIT2022
-    return (BuiltInCategory)category.Id.IntegerValue;
+    return (BuiltInCategory)category.Id.GetIntegerValue();
 #else
     return category.BuiltInCategory;
 #endif

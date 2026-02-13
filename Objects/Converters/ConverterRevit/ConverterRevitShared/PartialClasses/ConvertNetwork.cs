@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Electrical;
+using RevitSharedResources.Helpers.Extensions;
 using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 using ConverterRevitShared.Revit;
@@ -270,7 +271,7 @@ public partial class ConverterRevit
             BuiltInCategory.OST_CableTrayFitting,
             BuiltInCategory.OST_ConduitFitting
           };
-          if (fittingCategories.Any(c => (int)c == fi.Category.Id.IntegerValue))
+          if (fittingCategories.Any(c => (int)c == fi.Category.Id.GetIntegerValue()))
           {
             connectorBasedCreation = IsConnectorBasedCreation(fi);
             var partType = (PartType)

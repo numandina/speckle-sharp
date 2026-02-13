@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
+using RevitSharedResources.Helpers.Extensions;
 using Objects.BuiltElements;
 using Objects.BuiltElements.Revit;
 using Speckle.Core.Models;
@@ -87,7 +88,7 @@ public partial class ConverterRevit
           existingCurve = baseLine;
 
           // check for a type change
-          if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+          if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
           {
             revitBeam.ChangeTypeId(familySymbol.Id);
           }

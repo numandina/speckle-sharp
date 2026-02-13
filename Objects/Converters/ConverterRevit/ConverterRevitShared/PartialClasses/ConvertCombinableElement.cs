@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using Speckle.Core.Models;
 
 namespace Objects.Converter.Revit;
@@ -9,7 +10,7 @@ public partial class ConverterRevit
 {
   public FreeformElement CombinableElementToSpeckle(CombinableElement combinableElement)
   {
-    var cat = ((BuiltInCategory)combinableElement.Document.OwnerFamily.FamilyCategoryId.IntegerValue).ToString();
+    var cat = ((BuiltInCategory)combinableElement.Document.OwnerFamily.FamilyCategoryId.GetIntegerValue()).ToString();
 
     Options options = new();
     if (combinableElement is GenericForm gf && gf.Combinations.Size != 0)

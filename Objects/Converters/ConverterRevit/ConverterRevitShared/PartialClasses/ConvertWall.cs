@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.DB;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using Speckle.Core.Models;
 using DB = Autodesk.Revit.DB;
 using Mesh = Objects.Geometry.Mesh;
@@ -334,7 +335,7 @@ public partial class ConverterRevit
       return;
     }
 
-    if (wall.SketchId.IntegerValue == -1)
+    if (wall.SketchId.GetIntegerValue() == -1)
     {
       Doc.Regenerate();
       wall.CreateProfileSketch();

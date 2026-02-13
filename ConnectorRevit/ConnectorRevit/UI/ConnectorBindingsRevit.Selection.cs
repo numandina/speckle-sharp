@@ -426,7 +426,7 @@ public partial class ConnectorBindingsRevit
       }
       if (elements.Count > 0)
       {
-        selection.AddRange(elements.GroupBy(x => x.Id.IntegerValue).Select(x => x.First()).ToList());
+        selection.AddRange(elements.GroupBy(x => x.Id.GetIntegerValue()).Select(x => x.First()).ToList());
       }
     }
     return selection;

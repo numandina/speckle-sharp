@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autodesk.Revit.DB;
 using RevitSharedResources.Extensions.SpeckleExtensions;
+using RevitSharedResources.Helpers.Extensions;
 using RevitSharedResources.Interfaces;
 using Speckle.Core.Kits;
 using Speckle.Core.Logging;
@@ -13,7 +14,9 @@ namespace Speckle.ConnectorRevit;
 
 public static class ConnectorRevitUtils
 {
-#if REVIT2025
+#if REVIT2026
+  public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2026);
+#elif REVIT2025
   public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2025);
 #elif REVIT2024
   public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2024);
@@ -52,7 +55,7 @@ public static class ConnectorRevitUtils
   /// <returns></returns>
   public static string GetEnglishCategoryName(Category category)
   {
-    var builtInCategory = (BuiltInCategory)category.Id.IntegerValue;
+    var builtInCategory = (BuiltInCategory)category.Id.GetIntegerValue();
     var builtInCategoryName = builtInCategory
       .ToString()
       .Replace("OST_IOS", "") //for OST_IOSModelGroups

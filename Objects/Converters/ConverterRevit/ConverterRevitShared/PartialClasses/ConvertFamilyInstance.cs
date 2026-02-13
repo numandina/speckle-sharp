@@ -42,8 +42,8 @@ public partial class ConverterRevit
     if (
       @base == null
       && (
-        revitFi.Category.Id.IntegerValue == (int)BuiltInCategory.OST_CurtainWallMullions
-        || revitFi.Category.Id.IntegerValue == (int)BuiltInCategory.OST_CurtainWallPanels
+        revitFi.Category.Id.GetIntegerValue() == (int)BuiltInCategory.OST_CurtainWallMullions
+        || revitFi.Category.Id.GetIntegerValue() == (int)BuiltInCategory.OST_CurtainWallPanels
       )
     )
     {
@@ -204,7 +204,7 @@ public partial class ConverterRevit
           }
 
           // check for a type change
-          if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+          if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
           {
             familyInstance.ChangeTypeId(familySymbol.Id);
           }

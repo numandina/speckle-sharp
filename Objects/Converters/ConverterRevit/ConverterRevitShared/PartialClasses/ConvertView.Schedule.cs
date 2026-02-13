@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Objects.Organization;
+using RevitSharedResources.Helpers.Extensions;
 using RevitSharedResources.Models;
 using Speckle.Core.Logging;
 using Speckle.Core.Models;
@@ -56,7 +57,7 @@ public partial class ConverterRevit
     Dictionary<int, RevitParameterData> speckleIndexToRevitParameterDataMap
   )
   {
-    var fieldInt = info.field.ParameterId.IntegerValue;
+    var fieldInt = info.field.ParameterId.GetIntegerValue();
 
     var incomingColumnIndex = -1;
     for (var i = 0; i < speckleTable.columnMetadata.Count; i++)
@@ -240,10 +241,10 @@ public partial class ConverterRevit
     // add column header to list for potential future use
     columnHeaders.Add(info.field.ColumnHeading);
 
-    var builtInParameter = (BuiltInParameter)info.field.ParameterId.IntegerValue;
+    var builtInParameter = (BuiltInParameter)info.field.ParameterId.GetIntegerValue();
 
     var columnMetadata = new Base();
-    columnMetadata["BuiltInParameterInteger"] = info.field.ParameterId.IntegerValue;
+    columnMetadata["BuiltInParameterInteger"] = info.field.ParameterId.GetIntegerValue();
     string fieldType = info.field.FieldType.ToString();
 
     Parameter param;
@@ -281,7 +282,7 @@ public partial class ConverterRevit
     }
     else
     {
-      var scheduleCategory = (BuiltInCategory)revitSchedule.Definition.CategoryId.IntegerValue;
+      var scheduleCategory = (BuiltInCategory)revitSchedule.Definition.CategoryId.GetIntegerValue();
       SpeckleLog.Logger.Warning(
         "Schedule of category, {scheduleCategory}, contains field of type {builtInParameter} which has an unsupported field type, {fieldType}",
         scheduleCategory,

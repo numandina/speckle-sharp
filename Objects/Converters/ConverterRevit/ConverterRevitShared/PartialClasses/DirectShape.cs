@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using Objects.Geometry;
 using Speckle.Core.Models;
 using DB = Autodesk.Revit.DB;
@@ -82,7 +83,7 @@ namespace Objects.Converter.Revit
 
     private DirectShape DirectShapeToSpeckle(DB.DirectShape revitAc)
     {
-      var cat = ((BuiltInCategory)revitAc.Category.Id.IntegerValue).ToString();
+      var cat = ((BuiltInCategory)revitAc.Category.Id.GetIntegerValue()).ToString();
       var category = RevitUtils.GetCategory(cat);
       var element = revitAc.get_Geometry(new Options());
       var geometries = element

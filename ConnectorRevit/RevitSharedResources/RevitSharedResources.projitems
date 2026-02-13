@@ -13,6 +13,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\SpeckleExtensions\IRevitDocumentAggregateCacheExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Extensions\SpeckleExtensions\IRevitObjectCacheExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Helpers\Categories.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Helpers\ElementIdExtensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Helpers\Extensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Helpers\RevitCategoryInfo.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Interfaces\IRevitCommitObjectBuilder.cs" />

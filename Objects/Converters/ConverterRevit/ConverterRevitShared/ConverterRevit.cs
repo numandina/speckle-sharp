@@ -33,7 +33,9 @@ using OR = Objects.Other.Revit;
 
 public partial class ConverterRevit : ISpeckleConverter
 {
-#if REVIT2025
+#if REVIT2026
+  public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2026);
+#elif REVIT2025
   public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2025);
 #elif REVIT2024
   public static string RevitAppName = HostApplications.Revit.GetVersion(HostAppVersion.v2024);
@@ -371,7 +373,7 @@ public partial class ConverterRevit : ISpeckleConverter
     r.family = symbol?.FamilyName ?? symbol?.Family?.Name;
     r.type = symbol?.Name;
     r.category = fi.Category?.Name;
-    r.builtInCategory = fi.Category?.Id.IntegerValue;
+    r.builtInCategory = fi.Category?.Id.GetIntegerValue();
 
     r["name"] = niceName;
     r["displayName"] = niceName;
@@ -556,7 +558,7 @@ public partial class ConverterRevit : ISpeckleConverter
     {
       if (@object is DB.Element e)
       {
-        Report.Log($"[CTS] pick id:{e.UniqueId} cat:{e.Category?.Name} bic:{e.Category?.Id.IntegerValue}");
+        Report.Log($"[CTS] pick id:{e.UniqueId} cat:{e.Category?.Name} bic:{e.Category?.Id.GetIntegerValue()}");
       }
     }
     catch { }
@@ -573,7 +575,7 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = DirectShapeToSpeckle(o);
         break;
       case DB.FamilyInstance o
-  when o.Category?.Id.IntegerValue == (int)DB.BuiltInCategory.OST_StructConnections:
+  when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_StructConnections:
         DebugLog($"[CTS] hit struct-conn: {o.UniqueId}");
         returnObject = WorkPlaneConnectionFamilyToSpeckle(o, out notes);
         DebugLog($"[CTS] OUT type: {returnObject?.speckle_type}");
@@ -602,11 +604,11 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = ConvertAndCacheMaterial(o.Id, o.Document);
         break;
       case DB.ModelCurve o:
-        if ((BuiltInCategory)o.Category.Id.IntegerValue == BuiltInCategory.OST_RoomSeparationLines)
+        if ((BuiltInCategory)o.Category.Id.GetIntegerValue() == BuiltInCategory.OST_RoomSeparationLines)
         {
           returnObject = RoomBoundaryLineToSpeckle(o);
         }
-        else if ((BuiltInCategory)o.Category.Id.IntegerValue == BuiltInCategory.OST_MEPSpaceSeparationLines)
+        else if ((BuiltInCategory)o.Category.Id.GetIntegerValue() == BuiltInCategory.OST_MEPSpaceSeparationLines)
         {
           returnObject = SpaceSeparationLineToSpeckle(o);
         }
@@ -702,7 +704,7 @@ public partial class ConverterRevit : ISpeckleConverter
         returnObject = GridLineToSpeckle(o);
         break;
       case DB.ReferencePoint o:
-        if ((BuiltInCategory)o.Category.Id.IntegerValue == BuiltInCategory.OST_AnalyticalNodes)
+        if ((BuiltInCategory)o.Category.Id.GetIntegerValue() == BuiltInCategory.OST_AnalyticalNodes)
         {
           returnObject = AnalyticalNodeToSpeckle(o);
         }
@@ -1286,13 +1288,13 @@ public partial class ConverterRevit : ISpeckleConverter
 
         if (revitType == null || familySymbol.FamilyName != revitType.FamilyName)
         {
-          DebugLog($"[RVTIN] Existing type family mismatch -> deleting {docObj.Id.IntegerValue}");
+          DebugLog($"[RVTIN] Existing type family mismatch -> deleting {docObj.Id.GetIntegerValue()}");
           Doc.Delete(docObj.Id);
         }
         else
         {
           familyInstance = (DB.FamilyInstance)docObj;
-          DebugLog($"[RVTIN] Updating existing uid:{familyInstance.UniqueId} host:{familyInstance.Host?.Id.IntegerValue}");
+          DebugLog($"[RVTIN] Updating existing uid:{familyInstance.UniqueId} host:{familyInstance.Host?.Id.GetIntegerValue()}");
 
           if (forceNamedWorkPlane)
           {
@@ -1307,9 +1309,9 @@ public partial class ConverterRevit : ISpeckleConverter
             if ((familyInstance.Location as DB.LocationPoint).Point != newPt)
               (familyInstance.Location as DB.LocationPoint).Point = newPt;
 
-            if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+            if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
             {
-              DebugLog($"[RVTIN] Type change (old:{revitType.Id.IntegerValue}, new:{familySymbol.Id.IntegerValue})");
+              DebugLog($"[RVTIN] Type change (old:{revitType.Id.GetIntegerValue()}, new:{familySymbol.Id.GetIntegerValue()})");
               familyInstance.ChangeTypeId(familySymbol.Id);
             }
 
@@ -1362,7 +1364,7 @@ public partial class ConverterRevit : ISpeckleConverter
 
         try
         {
-#if REVIT2019 || REVIT2020 || REVIT2021 || REVIT2022 || REVIT2023 || REVIT2024 || REVIT2025
+#if REVIT2019 || REVIT2020 || REVIT2021 || REVIT2022 || REVIT2023 || REVIT2024 || REVIT2025 || REVIT2026
           sp = (rp != null)
                ? DB.SketchPlane.Create(Doc, rp.Id)
                : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
@@ -1577,10 +1579,10 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     }
 
     // diagnostics
-    var hostId = familyInstance.Host?.Id.IntegerValue;
+    var hostId = familyInstance.Host?.Id.GetIntegerValue();
     var skPlaneId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
-    var skPlaneStr = (skPlaneId != null && skPlaneId.IntegerValue > 0) ? $"{skPlaneId.IntegerValue}" : "<none>";
-    var planeName = skPlaneId != null && skPlaneId.IntegerValue > 0
+    var skPlaneStr = (skPlaneId != null && skPlaneId.GetIntegerValue() > 0) ? $"{skPlaneId.GetIntegerValue()}" : "<none>";
+    var planeName = skPlaneId != null && skPlaneId.GetIntegerValue() > 0
                       ? (Doc.GetElement(skPlaneId) as DB.SketchPlane)?.Name
                       : "<none>";
     if (familyInstance.Location is DB.LocationPoint finalLp)
@@ -1676,7 +1678,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
         {
           // Try sketch plane first
           var spId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
-          var sp = (spId != null && spId.IntegerValue > 0) ? doc.GetElement(spId) as DB.SketchPlane : null;
+          var sp = (spId != null && spId.GetIntegerValue() > 0) ? doc.GetElement(spId) as DB.SketchPlane : null;
           if (sp != null)
           {
             var pl = sp.GetPlane();
@@ -1744,7 +1746,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     XYZ dir = null;
 
     var skId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
-    var sp = (skId != null && skId.IntegerValue > 0) ? Doc.GetElement(skId) as DB.SketchPlane : null;
+    var sp = (skId != null && skId.GetIntegerValue() > 0) ? Doc.GetElement(skId) as DB.SketchPlane : null;
 
     if (sp != null)
     {
@@ -1910,7 +1912,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
             else
             {
               // Allow type changes
-              if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+              if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
                 familyInstance.ChangeTypeId(familySymbol.Id);
             }
           }
@@ -1923,7 +1925,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
             if ((familyInstance.Location as LocationPoint).Point != newPt)
               (familyInstance.Location as LocationPoint).Point = newPt;
 
-            if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+            if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
               familyInstance.ChangeTypeId(familySymbol.Id);
 
             TrySetParam(familyInstance, BuiltInParameter.FAMILY_LEVEL_PARAM, level);
@@ -2286,7 +2288,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
   private static SketchPlane TryGetSketchPlane(DB.FamilyInstance fi)
   {
     var id = fi.get_Parameter(BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
-    return (id != null && id.IntegerValue > 0) ? fi.Document.GetElement(id) as SketchPlane : null;
+    return (id != null && id.GetIntegerValue() > 0) ? fi.Document.GetElement(id) as SketchPlane : null;
   }
 
   private static XYZ ResolveInPlaneAxis(DB.FamilyInstance fi, bool usePlaneX = true)

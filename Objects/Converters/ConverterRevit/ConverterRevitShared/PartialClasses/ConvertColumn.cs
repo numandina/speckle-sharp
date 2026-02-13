@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
+using RevitSharedResources.Helpers.Extensions;
 using Objects.BuiltElements.Revit;
 using Speckle.Core.Models;
 using Column = Objects.BuiltElements.Column;
@@ -104,7 +105,7 @@ public partial class ConverterRevit
           }
 
           // check for a type change
-          if (isExactMatch && revitType.Id.IntegerValue != familySymbol.Id.IntegerValue)
+          if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
           {
             revitColumn.ChangeTypeId(familySymbol.Id);
           }
