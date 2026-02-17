@@ -452,16 +452,8 @@ public partial class ConverterRevit : ISpeckleConverter
     return (bb.Min + bb.Max) * 0.5;
   }
 
-  // Reuse your existing face-picking logic, but with an explicit host Element
-  private Reference GetNearestPlanarFaceReference(Element host, XYZ nearPoint)
-  {
-    var op = new Options { ComputeReferences = true };
-    var ge = host.get_Geometry(op);
-    Reference faceRef = null;
-    double planeDist = double.MaxValue;
-    GetReferencePlane(ge, nearPoint, ref faceRef, ref planeDist);
-    return faceRef;
-  }
+  // Face-hosting helpers removed — clips are hosted on a plane, not an element.
+  // See git history for FindNearestColumn and GetNearestPlanarFaceReference if needed.
 
 
 
@@ -1346,16 +1338,19 @@ public partial class ConverterRevit : ISpeckleConverter
 
         try
         {
-          var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, yawRad ?? 0.0);
+          // Use rotation directly — Unity already encodes the correct global yaw
+          // (including isTop-specific PI offset for bottom boots).
+          // NO additional +PI here; that was double-correcting.
+          var adjustedYaw = yawRad ?? 0.0;
+          var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, adjustedYaw);
           var yDir = rotT.OfVector(DB.XYZ.BasisY);
           var bubble = insertionPoint;
           var free = insertionPoint + yDir;
-
-          // we no longer try to flip by changing plane normal; rotation will handle flip
           var cut = DB.XYZ.BasisZ;
 
           rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
           rp.Name = $"SPK_{Guid.NewGuid():N}".Substring(0, 8);
+          DebugLog($"[RVTIN] ReferencePlane created: yawRad={yawRad} adjustedYaw={adjustedYaw} isTop={instance["isTop"]} flipVertical={instance["flipVertical"]}");
         }
         catch (Exception ex)
         {
@@ -1473,9 +1468,13 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
 
     var shouldFlip = WantsVerticalFlip(instance);
+    bool vflipApplied = false;
+    DebugLog($"[RVTIN] flipVertical={shouldFlip} isTop={instance["isTop"]} yawRad={yawRad}");
 
     if (shouldFlip && familyInstance?.Location is DB.LocationPoint lp)
     {
+      DebugLog($"[VFlip] PRE-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
+
       using (var st = new DB.SubTransaction(Doc))
       {
         st.Start();
@@ -1484,7 +1483,6 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
         try { if (familyInstance.Pinned) { familyInstance.Pinned = false; rePin = true; } }
         catch (Exception ex) { DebugLog($"[VFlip] Unpin failed: {ex.Message}"); }
 
-        // Horizontal plane through insertion point (normal = WORLD Z) -> flips up/down
         var plane = DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisZ, lp.Point);
 
         try
@@ -1493,42 +1491,15 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
             Doc,
             new List<DB.ElementId> { familyInstance.Id },
             plane,
-            false // mirrorCopies
+            false
           );
-          DebugLog("[VFlip] Mirrored across world-Z (horizontal) plane.");
+          vflipApplied = true;
+          DebugLog($"[VFlip] POST-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
         }
         catch (Exception ex)
         {
           DebugLog($"[VFlip] MirrorElements failed: {ex.GetType().Name}: {ex.Message}");
-
-          // Fallback: 180° rotate around a WORLD-HORIZONTAL axis through the insertion point
-          try
-          {
-            var axis = DB.Line.CreateUnbound(lp.Point, DB.XYZ.BasisX); // BasisY also works
-            DB.ElementTransformUtils.RotateElement(Doc, familyInstance.Id, axis, Math.PI);
-            DebugLog("[VFlip] Fallback 180° rotate around world X succeeded.");
-          }
-          catch (Exception ex2)
-          {
-            DebugLog($"[VFlip] Fallback rotate failed: {ex2.GetType().Name}: {ex2.Message}");
-          }
         }
-
-        // Try to re-add void cut (common for structural connections) and log outcome
-        try
-        {
-          var hostElem = familyInstance.Host as DB.Element;
-          if (hostElem != null)
-          {
-            DB.InstanceVoidCutUtils.AddInstanceVoidCut(Doc, hostElem, familyInstance);
-            DebugLog("[VFlip] AddInstanceVoidCut attempted.");
-          }
-          else
-          {
-            DebugLog("[VFlip] No host to cut.");
-          }
-        }
-        catch (Exception ex) { DebugLog($"[VFlip] AddInstanceVoidCut failed: {ex.Message}"); }
 
         try { if (rePin) familyInstance.Pinned = true; }
         catch (Exception ex) { DebugLog($"[VFlip] Re-pin failed: {ex.Message}"); }
@@ -1556,26 +1527,34 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       }
     }
 
-    // Hand / Facing / standard mirror
-    if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped) familyInstance.flipHand();
-    if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped) familyInstance.flipFacing();
-    if (instance.mirrored != familyInstance.Mirrored)
+    // Hand / Facing / standard mirror — SKIP if we just applied VFlip via MirrorElements,
+    // because the mirror changes flip/mirror state and the correction would undo it.
+    if (!vflipApplied)
     {
-      DB.Group group = null;
-      try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
-      catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
+      if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped) familyInstance.flipHand();
+      if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped) familyInstance.flipFacing();
+      if (instance.mirrored != familyInstance.Mirrored)
+      {
+        DB.Group group = null;
+        try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
+        catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
 
-      var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
-      try
-      {
-        DB.ElementTransformUtils.MirrorElements(
-          Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisY, insertionPoint), false);
+        var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
+        try
+        {
+          DB.ElementTransformUtils.MirrorElements(
+            Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisY, insertionPoint), false);
+        }
+        catch (Autodesk.Revit.Exceptions.ApplicationException e)
+        {
+          appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
+        }
+        group?.UngroupMembers();
       }
-      catch (Autodesk.Revit.Exceptions.ApplicationException e)
-      {
-        appObj.Update(logItem: $"Instance could not be mirrored: {e.Message}");
-      }
-      group?.UngroupMembers();
+    }
+    else
+    {
+      DebugLog($"[RVTIN] Skipping hand/facing/mirror correction (VFlip applied). Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
     }
 
     // diagnostics

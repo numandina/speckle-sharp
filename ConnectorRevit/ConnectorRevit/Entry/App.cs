@@ -75,9 +75,13 @@ public class App : IExternalApplication
       InitializeUiPanel(application);
 
       // Confirms the correct build is loaded
+      var connectorTime = File.GetLastWriteTime(typeof(App).Assembly.Location);
+      var converterPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Speckle", "Kits", "Objects", $"Objects.Converter.Revit{GetRevitVersion()}.dll");
+      var converterTime = File.Exists(converterPath) ? File.GetLastWriteTime(converterPath) : DateTime.MinValue;
+      var latestTime = connectorTime > converterTime ? connectorTime : converterTime;
       new TaskDialog("CloudFab Speckle")
       {
-        MainContent = $"CloudFab Speckle plugin loaded.\nBuild: {File.GetLastWriteTime(typeof(App).Assembly.Location):yyyy-MM-dd HH:mm:ss}"
+        MainContent = $"CloudFab Speckle plugin loaded.\nLatest build: {latestTime:yyyy-MM-dd HH:mm:ss}"
       }.Show();
 
       return Result.Succeeded;

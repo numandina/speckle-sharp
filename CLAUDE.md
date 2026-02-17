@@ -77,11 +77,27 @@ After building, copy `Objects.dll` from `%APPDATA%\Speckle\Kits\Objects\Objects.
 
 ### 1. Build (local testing)
 
+**Important: ConnectorRevit2025 does NOT build ConverterRevit2025.** They are separate projects. You must build both.
+
+**Close Revit AND Unity before building.** Both lock DLLs in `%APPDATA%\Speckle\Kits\Objects\` — Revit locks the converter DLLs, Unity locks them via its Speckle modules. The `CopyToKitFolder` post-build xcopy will fail with exit code 4 ("user-mapped section open") if either is running.
+
 ```bash
+# Step 1: Build the Connector (deploys to Revit addins folder)
 powershell.exe -NoProfile -Command 'dotnet build "C:\Users\RAMBAGE\speckle-sharp\ConnectorRevit\ConnectorRevit2025\ConnectorRevit2025.csproj" -c Debug -p:SolutionDir="C:\Users\RAMBAGE\speckle-sharp\"'
+
+# Step 2: Build the Converter (deploys to Speckle Kits folder)
+# Use CopyToKitFolder=false if the xcopy post-build still fails, then manually copy.
+powershell.exe -NoProfile -Command 'dotnet build "C:\Users\RAMBAGE\speckle-sharp\Objects\Converters\ConverterRevit\ConverterRevit2025\ConverterRevit2025.csproj" -c Debug -p:SolutionDir="C:\Users\RAMBAGE\speckle-sharp\" --no-incremental'
 ```
 
-This builds the full chain (Connector + Converter + Objects) and the Debug post-build events auto-deploy everything to the Revit addins folder and Speckle Kits folder. No manual copy needed for Revit.
+If the converter build fails on the DxfConverter xcopy (exit code 4), bypass it:
+```bash
+powershell.exe -NoProfile -Command 'dotnet build "C:\Users\RAMBAGE\speckle-sharp\Objects\Converters\ConverterRevit\ConverterRevit2025\ConverterRevit2025.csproj" -c Debug -p:SolutionDir="C:\Users\RAMBAGE\speckle-sharp\" -p:CopyToKitFolder=false --no-incremental'
+# Then manually deploy:
+powershell.exe -NoProfile -Command 'Copy-Item "C:\Users\RAMBAGE\speckle-sharp\Objects\Converters\ConverterRevit\ConverterRevit2025\bin\Debug\net8.0-windows\Objects.Converter.Revit2025.dll" "$env:APPDATA\Speckle\Kits\Objects\" -Force'
+```
+
+**Verify timestamps after build** — if the converter DLL timestamp didn't change, it wasn't rebuilt. Use `--no-incremental` to force recompilation.
 
 ### 2. Copy Objects.dll to Unity
 
@@ -94,6 +110,7 @@ powershell.exe -NoProfile -Command 'Copy-Item "$env:APPDATA\Speckle\Kits\Objects
 - Restart Revit (it locks the DLLs — must close and reopen)
 - In Unity, enter Play mode (Unity reloads DLLs on domain reload)
 - Send from one side, receive on the other, verify the data round-trips
+- Check converter logs at `%LOCALAPPDATA%\Speckle\Logs\Revit-WP\` for `[RVTIN]` messages
 
 ### 4. Distribute to 3rd party
 
@@ -102,6 +119,52 @@ powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build
 ```
 
 Output: `dist\CloudFabRevit2025\` — zip that folder and send it. Recipient runs `CloudFabRevitInstaller.exe`, restarts Revit, done.
+
+## Connection Rotation & Flip (Unity → Revit)
+
+Connections are hosted on a ReferencePlane + SketchPlane (plane-hosted, NOT element/face-hosted). The rotation/flip pipeline spans both repos.
+
+### `manualAngles` (per-prefab mesh offset)
+
+`CloudFabProperties.manualAngles` (`Vector3`) is a per-prefab mesh offset. Each clip prefab's mesh vertices are pre-rotated differently inside the prefab — even when the Unity transform is `(0,0,0)` the mesh faces an arbitrary direction. `manualAngles` must be removed before extracting yaw for Revit.
+
+### Send side (cloudfab-unity, `DebugHosting.SetConnectionProps`)
+
+**Rotation + flip (current field-validated mapping):**
+```
+q = unityRotation * inverse(euler(manualAngles))
+if isTop:
+    q = q * angleAxis(-180deg, X)      // remove Unity top flip before yaw extraction
+
+baseYaw = deltaAngle(q.eulerY)
+rotation = -baseYaw * deg2rad + PI
+flipVertical = !isTop
+```
+- Quaternion removal of `manualAngles` is more reliable than Euler Y subtraction when top/bottom flips are involved.
+- The +PI yaw compensation is currently applied for all clips in the active family set.
+- `flipVertical` is intentionally inverted (`!isTop`) for current clips; this matches Revit visual results for jamb + bridging clips in real sends.
+- `isTop` edits made after framing are not sent unless `SetConnectionProps()` is run again (payload is prepared in `Prepare2Revit()`).
+
+**Host ID:** `sp.Data["connectedElementId"] = colId` where `colId = AppIdUtility.GetOrCreate(col.gameObject)` (format: `UNITY-{guid}`). This was accidentally removed in commit `71240bd` and must be present.
+
+### Receive side (this repo, `ConverterRevit.RevitInstanceToNative`)
+
+- Reads `rotation` from `instance["rotation"]` (dynamic double, since Unity sends `RevitInstance` not `RevitWorkPlaneFamilyInstance`)
+- Uses `rotation` directly as the ReferencePlane yaw — no additional receive-side offset.
+- Reads `flipVertical` via `WantsVerticalFlip()` → applies vertical mirror via `MirrorElements` across horizontal plane (normal=BasisZ) at the insertion point
+- After VFlip, hand/facing/mirror corrections are skipped (`vflipApplied` guard) to prevent undoing the mirror
+
+### Log-first validation workflow
+
+Use `%LOCALAPPDATA%\Speckle\Logs\Revit-WP\<latest>\log.txt` and check:
+- `[RVTIN] instance:... fam:'...' ... yaw(rad):...`
+- `[RVTIN] flipVertical=True|False ...`
+
+For quick checks, group by family and count True/False to verify payload mapping before debugging visual orientation.
+
+## Startup Popup
+
+`ConnectorRevit/Entry/App.cs` shows both Connector and Converter build timestamps on startup. Converter path is resolved via `SpecklePathProvider.InstallApplicationDataPath + /Kits/Objects/Objects.Converter.Revit2025.dll`.
 
 ## Relationship to cloudfab-unity
 
