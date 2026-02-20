@@ -551,6 +551,10 @@ public partial class ConverterRevit : ISpeckleConverter
       if (@object is DB.Element e)
       {
         Report.Log($"[CTS] pick id:{e.UniqueId} cat:{e.Category?.Name} bic:{e.Category?.Id.GetIntegerValue()}");
+        if (@object is DB.FamilyInstance fi2 && fi2.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel)
+        {
+          FileLogger.Log($"[CTS-DIAG] GenericModel id:{fi2.UniqueId} fam:{fi2.Symbol?.Family?.Name} placement:{fi2.Symbol?.Family?.FamilyPlacementType}");
+        }
       }
     }
     catch { }
@@ -573,7 +577,18 @@ public partial class ConverterRevit : ISpeckleConverter
         DebugLog($"[CTS] OUT type: {returnObject?.speckle_type}");
         break;
 
+      case DB.FamilyInstance o
+  when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel
+    && (o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.WorkPlaneBased
+     || o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.OneLevelBased):
+        DebugLog($"[CTS] hit generic-model WPB: {o.UniqueId}");
+        returnObject = WorkPlaneConnectionFamilyToSpeckle(o, out notes);
+        DebugLog($"[CTS] OUT type: {returnObject?.speckle_type}");
+        break;
+
       case DB.FamilyInstance o:
+        if (o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel)
+          DebugLog($"[CTS] FALLTHROUGH generic-model: {o.UniqueId} fam:{o.Symbol?.Family?.Name} placement:{o.Symbol?.Family?.FamilyPlacementType}");
         returnObject = FamilyInstanceToSpeckle(o, out notes);
         break;
       case DB.Floor o:
