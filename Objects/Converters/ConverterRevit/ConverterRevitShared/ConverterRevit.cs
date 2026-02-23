@@ -1353,10 +1353,11 @@ public partial class ConverterRevit : ISpeckleConverter
 
         try
         {
-          // Use rotation directly — Unity already encodes the correct global yaw
-          // (including isTop-specific PI offset for bottom boots).
-          // NO additional +PI here; that was double-correcting.
-          var adjustedYaw = yawRad ?? 0.0;
+          // Clips encode rotation in the ReferencePlane direction (includes PI offset).
+          // Screws (no connectedElementId) use RotateElement instead — their 0/180
+          // yaw values produce equivalent planes via ReferencePlane encoding.
+          bool isConnection = instance["connectedElementId"] != null;
+          var adjustedYaw = isConnection ? (yawRad ?? 0.0) : 0.0;
           var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, adjustedYaw);
           var yDir = rotT.OfVector(DB.XYZ.BasisY);
           var bubble = insertionPoint;
@@ -1526,7 +1527,10 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
 
 
-    if (!isWorkPlaneBased)
+    // Clips: rotation handled by ReferencePlane direction (skip RotateElement).
+    // Screws & non-WPB: rotation handled by RotateElement.
+    bool skipRotateElement = isWorkPlaneBased && instance["connectedElementId"] != null;
+    if (!skipRotateElement)
     {
       if (yawRad.HasValue && Math.Abs(yawRad.Value) > 1e-9 && familyInstance.Location is DB.LocationPoint lpt)
       {
@@ -1584,6 +1588,28 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     DebugLog($"[RVTIN] Final: host:{(hostId.HasValue ? hostId.ToString() : "<null>")} SKETCH_PLANE_PARAM:{skPlaneStr} name:{planeName}");
 
     SetInstanceParameters(familyInstance, instance);
+
+    // INSTANCE_ELEVATION_PARAM is excluded by SetInstanceParameters' ParametersMap
+    // IsReadOnly filter for WorkPlaneBased instances. Set it directly.
+    if (isWorkPlaneBased)
+    {
+      var spParams = instance["parameters"] as Base;
+      var elevSp = spParams?["INSTANCE_ELEVATION_PARAM"] as Objects.BuiltElements.Revit.Parameter;
+      if (elevSp?.value != null)
+      {
+        var elevParam = familyInstance.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
+        if (elevParam != null && !elevParam.IsReadOnly)
+        {
+          elevParam.Set(RevitVersionHelper.ConvertToInternalUnits(elevSp.value, elevSp.applicationUnit));
+          DebugLog($"[RVTIN] INSTANCE_ELEVATION_PARAM set to {elevSp.value} (unit:{elevSp.applicationUnit})");
+        }
+        else
+        {
+          DebugLog($"[RVTIN] INSTANCE_ELEVATION_PARAM not writable: exists={elevParam != null} readOnly={elevParam?.IsReadOnly}");
+        }
+      }
+    }
+
     var state = isUpdate ? ApplicationObject.State.Updated : ApplicationObject.State.Created;
     appObj.Update(status: state, createdId: familyInstance.UniqueId, convertedItem: familyInstance);
     return appObj;

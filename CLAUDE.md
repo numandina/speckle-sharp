@@ -162,6 +162,22 @@ Use `%LOCALAPPDATA%\Speckle\Logs\Revit-WP\<latest>\log.txt` and check:
 
 For quick checks, group by family and count True/False to verify payload mapping before debugging visual orientation.
 
+## Screw Rotation & Elevation (Unity → Revit)
+
+Screws are WorkPlaneBased `RevitInstance` objects — simpler than clips (no host ID, no flip, no manualAngles).
+
+**Family requirement:** The Revit screw family must have "Work-Plane-Based" checked in the Family Editor. Without this, elevation from host stays 0.
+
+### Rotation
+
+Screws use `RotateElement`, NOT ReferencePlane direction encoding. The ReferencePlane is created with yaw=0 (hosting only). The converter distinguishes screws from clips via `connectedElementId == null` → applies `RotateElement` instead.
+
+**Why:** Screws typically have only 0° and 180° yaw (facing opposite sides of a stud). These values produce geometrically equivalent ReferencePlane lines (±Y), so the plane approach can't distinguish them. `RotateElement` rotates the instance on the plane independently.
+
+### Elevation
+
+`INSTANCE_ELEVATION_PARAM` is set explicitly via `get_Parameter()` after `SetInstanceParameters`. The generic `SetInstanceParameters` path skips it because the `ParametersMap` `IsReadOnly` filter excludes it for WorkPlaneBased instances.
+
 ## Startup Popup
 
 `ConnectorRevit/Entry/App.cs` shows both Connector and Converter build timestamps on startup. Converter path is resolved via `SpecklePathProvider.InstallApplicationDataPath + /Kits/Objects/Objects.Converter.Revit2025.dll`.
