@@ -1524,12 +1524,24 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       }
     }
 
-
-
+    // Face tilt for screws: faceUp = +90° around InPlaneX, faceDown = -90°
+    bool faceTilted = false;
+    if (TryGetDynBool(instance, "faceUp", out var fUp) && fUp)
+    {
+      TryRotateAngle(Doc, familyInstance, AxisKind.InPlaneX, Math.PI / 2.0, DebugLog);
+      faceTilted = true;
+    }
+    else if (TryGetDynBool(instance, "faceDown", out var fDown) && fDown)
+    {
+      TryRotateAngle(Doc, familyInstance, AxisKind.InPlaneX, -Math.PI / 2.0, DebugLog);
+      faceTilted = true;
+    }
 
     // Clips: rotation handled by ReferencePlane direction (skip RotateElement).
     // Screws & non-WPB: rotation handled by RotateElement.
-    bool skipRotateElement = isWorkPlaneBased && instance["connectedElementId"] != null;
+    // Face-tilted screws: yaw is irrelevant (rotating a circle), skip.
+    bool skipRotateElement = (isWorkPlaneBased && instance["connectedElementId"] != null)
+                           || faceTilted;
     if (!skipRotateElement)
     {
       if (yawRad.HasValue && Math.Abs(yawRad.Value) > 1e-9 && familyInstance.Location is DB.LocationPoint lpt)
@@ -1674,6 +1686,9 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
   }
 
   private bool TryRotate90(Document doc, DB.FamilyInstance fi, AxisKind axisKind, Action<string> log)
+    => TryRotateAngle(doc, fi, axisKind, Math.PI / 2.0, log);
+
+  private bool TryRotateAngle(Document doc, DB.FamilyInstance fi, AxisKind axisKind, double angleRad, Action<string> log)
   {
     if (fi == null) return false;
 
@@ -1727,8 +1742,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     try
     {
       var axis = DB.Line.CreateUnbound(pivot, axisDir);
-      DB.ElementTransformUtils.RotateElement(doc, fi.Id, axis, Math.PI / 2.0); // 90°
-      log("[R90] RotateElement 90° succeeded.");
+      DB.ElementTransformUtils.RotateElement(doc, fi.Id, axis, angleRad);
+      log($"[RotateAngle] RotateElement {angleRad * 180.0 / Math.PI:F1}° succeeded.");
     }
     catch (Exception ex)
     {
