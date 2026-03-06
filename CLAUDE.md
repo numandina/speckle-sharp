@@ -164,15 +164,21 @@ For quick checks, group by family and count True/False to verify payload mapping
 
 ## Screw Rotation & Elevation (Unity → Revit)
 
-Screws are WorkPlaneBased `RevitInstance` objects — simpler than clips (no host ID, no flip, no manualAngles).
+Screws are now `Structural Connections` (not `Generic Models`) and flow through the same `SetConnectionProps` / `RevitInstanceToNative` pipeline as clips. They are WorkPlaneBased `RevitInstance` objects — no host ID, no flip, no manualAngles.
 
 **Family requirement:** The Revit screw family must have "Work-Plane-Based" checked in the Family Editor. Without this, elevation from host stays 0.
 
-### Rotation
+### Rotation (3 cases)
 
-Screws use `RotateElement`, NOT ReferencePlane direction encoding. The ReferencePlane is created with yaw=0 (hosting only). The converter distinguishes screws from clips via `connectedElementId == null` → applies `RotateElement` instead.
+The converter distinguishes screws from clips via `connectedElementId == null` → applies `RotateElement` instead of ReferencePlane direction encoding.
 
-**Why:** Screws typically have only 0° and 180° yaw (facing opposite sides of a stud). These values produce geometrically equivalent ReferencePlane lines (±Y), so the plane approach can't distinguish them. `RotateElement` rotates the instance on the plane independently.
+1. **Default (horizontal):** `RotateElement` around BasisZ by yaw. ReferencePlane is created with yaw=0 (hosting only).
+2. **faceUp:** `TryRotateAngle(InPlaneX, +PI/2)` tilts screw 90° upward. Yaw is skipped (`faceTilted` flag).
+3. **faceDown:** `TryRotateAngle(InPlaneX, -PI/2)` tilts screw 90° downward. Yaw is skipped.
+
+`TryRotateAngle` is a generalized version of `TryRotate90` that accepts an arbitrary angle. `TryRotate90` still exists as a wrapper.
+
+**Why RotateElement for default yaw:** Screws typically have only 0° and 180° yaw (facing opposite sides of a stud). These values produce geometrically equivalent ReferencePlane lines (±Y), so the plane approach can't distinguish them.
 
 ### Elevation
 
