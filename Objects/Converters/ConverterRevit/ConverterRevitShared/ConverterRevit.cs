@@ -1353,20 +1353,46 @@ public partial class ConverterRevit : ISpeckleConverter
 
         try
         {
-          // Clips encode rotation in the ReferencePlane direction (includes PI offset).
-          // Screws (no connectedElementId) use RotateElement instead — their 0/180
-          // yaw values produce equivalent planes via ReferencePlane encoding.
-          bool isConnection = instance["connectedElementId"] != null;
-          var adjustedYaw = isConnection ? (yawRad ?? 0.0) : 0.0;
-          var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, adjustedYaw);
-          var yDir = rotT.OfVector(DB.XYZ.BasisY);
+          // Detect face-tilt early: tilted screws need a horizontal ReferencePlane
+          // instead of the default vertical one.  Revit silently deletes WPB instances
+          // rotated out of their work plane, so the tilt MUST be in the plane itself.
+          bool wantsFaceUp = TryGetDynBool(instance, "faceUp", out var fUpP) && fUpP;
+          bool wantsFaceDown = TryGetDynBool(instance, "faceDown", out var fDnP) && fDnP;
+
+          XYZ freeDir, cut;
+          if (wantsFaceUp)
+          {
+            // Horizontal plane: normal = cross(BasisY, -BasisX) = +Z → screw faces up
+            // freeDir=BasisY matches default screw plane orientation for correct in-plane heading
+            freeDir = DB.XYZ.BasisY;
+            cut = new XYZ(-1, 0, 0);
+            DebugLog("[RVTIN] faceUp: creating horizontal ReferencePlane (normal +Z)");
+          }
+          else if (wantsFaceDown)
+          {
+            // Horizontal plane: normal = cross(BasisY, BasisX) = -Z → screw faces down
+            freeDir = DB.XYZ.BasisY;
+            cut = DB.XYZ.BasisX;
+            DebugLog("[RVTIN] faceDown: creating horizontal ReferencePlane (normal -Z)");
+          }
+          else
+          {
+            // Clips encode rotation in the ReferencePlane direction (includes PI offset).
+            // Screws (no connectedElementId) use RotateElement instead — their 0/180
+            // yaw values produce equivalent planes via ReferencePlane encoding.
+            bool isConnection = instance["connectedElementId"] != null;
+            var adjustedYaw = isConnection ? (yawRad ?? 0.0) : 0.0;
+            var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, adjustedYaw);
+            freeDir = rotT.OfVector(DB.XYZ.BasisY);
+            cut = DB.XYZ.BasisZ;
+          }
+
           var bubble = insertionPoint;
-          var free = insertionPoint + yDir;
-          var cut = DB.XYZ.BasisZ;
+          var free = insertionPoint + freeDir;
 
           rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
           rp.Name = $"SPK_{Guid.NewGuid():N}".Substring(0, 8);
-          DebugLog($"[RVTIN] ReferencePlane created: yawRad={yawRad} adjustedYaw={adjustedYaw} isTop={instance["isTop"]} flipVertical={instance["flipVertical"]}");
+          DebugLog($"[RVTIN] ReferencePlane created: yawRad={yawRad} isTop={instance["isTop"]} flipVertical={instance["flipVertical"]} faceUp={wantsFaceUp} faceDown={wantsFaceDown}");
         }
         catch (Exception ex)
         {
@@ -1524,18 +1550,10 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       }
     }
 
-    // Face tilt for screws: faceUp = +90° around InPlaneX, faceDown = -90°
-    bool faceTilted = false;
-    if (TryGetDynBool(instance, "faceUp", out var fUp) && fUp)
-    {
-      TryRotateAngle(Doc, familyInstance, AxisKind.InPlaneX, Math.PI / 2.0, DebugLog);
-      faceTilted = true;
-    }
-    else if (TryGetDynBool(instance, "faceDown", out var fDown) && fDown)
-    {
-      TryRotateAngle(Doc, familyInstance, AxisKind.InPlaneX, -Math.PI / 2.0, DebugLog);
-      faceTilted = true;
-    }
+    // Face tilt for screws: tilt is now encoded in the ReferencePlane (created above).
+    // No RotateElement needed — Revit silently deletes WPB instances rotated out of plane.
+    bool faceTilted = (TryGetDynBool(instance, "faceUp", out var fUp) && fUp)
+                    || (TryGetDynBool(instance, "faceDown", out var fDown) && fDown);
 
     // Clips: rotation handled by ReferencePlane direction (skip RotateElement).
     // Screws & non-WPB: rotation handled by RotateElement.
