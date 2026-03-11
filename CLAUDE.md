@@ -46,15 +46,24 @@ Revit 2026 removed `ElementId.IntegerValue`. All call sites use `id.GetIntegerVa
 
 `Installer/` contains a self-contained C# console app that copies the connector + kit files to the right AppData locations on a recipient's machine.
 
-**Build a distribution package:**
+**Multi-version build (all Revit versions in one installer):**
+
+```powershell
+.\build-installer-all.ps1                          # builds 2023, 2024, 2025, 2026
+.\build-installer-all.ps1 -Versions 2023,2025      # specific versions only
+```
+
+Output: `dist\CloudFabRevit\` (~156 MB zipped). Zip and send. Recipient extracts, runs `CloudFabRevitInstaller.exe`, all versions install at once.
+
+**Single-version build (legacy):**
 
 ```powershell
 .\build-installer.ps1 -RevitVersion 2025   # or 2024, 2026
 ```
 
-This builds ConnectorRevit + ConverterRevit in Release, gathers all files, and publishes a ~12MB self-contained installer exe into `dist\CloudFabRevit{version}\`. Zip that folder and send it.
+Output: `dist\CloudFabRevit{version}\`.
 
-**What the installer copies:**
+**What the installer copies (per version):**
 
 | Source (next to exe) | Destination |
 |---|---|
@@ -62,7 +71,13 @@ This builds ConnectorRevit + ConverterRevit in Release, gathers all files, and p
 | `Connector\SpeckleRevit2\` (DLLs) | `%APPDATA%\Autodesk\Revit\Addins\{version}\SpeckleRevit2\` |
 | `Kit\` (Objects.dll, converter, templates) | `%APPDATA%\Speckle\Kits\Objects\` |
 
-The Revit version is baked into the exe at compile time via `AssemblyMetadataAttribute` (no config files). The `.addin` manifest uses a relative path so it works on any machine.
+The installer auto-detects mode: if it sees `20XX/` subdirectories next to the exe, it installs all of them (multi-version). Otherwise falls back to baked-in `AssemblyMetadataAttribute` (single-version). Safety: only deletes stale DLLs in `SpeckleRevit2\` if our DLLs are present; never touches other Revit add-ins.
+
+### Build script pitfalls
+
+- **PowerShell encoding:** `.ps1` files MUST have a UTF-8 BOM or use only ASCII characters. PowerShell 5.1 on Windows reads non-BOM files as Windows-1252, corrupting em-dashes and other Unicode. Never use em-dashes (`--`) in `.ps1` files; use regular hyphens (`-`).
+- **CopyToKitFolder xcopy failures:** The `Directory.Build.targets` `CopyToKitFolder` post-build target uses `xcopy` to copy DLLs to `%APPDATA%\Speckle\Kits\Objects\`. This fails with exit code 4 if Revit/Unity lock the DLLs, or if ConverterDxf hasn't been built. For Release/installer builds, pass `-p:CopyToKitFolder=false` to skip it (the build script gathers files directly from build output).
+- **ConverterDxf dependency:** ConverterRevit depends on ConverterDxf. If ConverterDxf hasn't been built in Release config, the xcopy post-build step for it fails. The multi-version build script skips this via `CopyToKitFolder=false`.
 
 ## Manual Step: Copy Objects.dll to Unity
 
@@ -115,10 +130,14 @@ powershell.exe -NoProfile -Command 'Copy-Item "$env:APPDATA\Speckle\Kits\Objects
 ### 4. Distribute to 3rd party
 
 ```bash
+# All versions (2023-2026) in one installer:
+powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build-installer-all.ps1'
+
+# Single version:
 powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build-installer.ps1 -RevitVersion 2025'
 ```
 
-Output: `dist\CloudFabRevit2025\` — zip that folder and send it. Recipient runs `CloudFabRevitInstaller.exe`, restarts Revit, done.
+Output: `dist\CloudFabRevit\` (multi) or `dist\CloudFabRevit2025\` (single). Zip and send. Recipient runs `CloudFabRevitInstaller.exe`, restarts Revit, done.
 
 ## Connection Rotation & Flip (Unity → Revit)
 

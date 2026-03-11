@@ -9,26 +9,171 @@ class Program
 {
   static int Main()
   {
-    string version = Assembly.GetExecutingAssembly()
-      .GetCustomAttributes<AssemblyMetadataAttribute>()
-      .First(a => a.Key == "RevitVersion").Value;
+    try
+    {
+      return Run();
+    }
+    catch (Exception ex)
+    {
+      Console.WriteLine();
+      Console.ForegroundColor = ConsoleColor.Red;
+      Console.WriteLine($"  FATAL ERROR: {ex.Message}");
+      Console.ResetColor();
+      Console.WriteLine();
+      Console.WriteLine("  If Revit is running, close it and try again.");
+      Console.WriteLine("  If the problem persists, contact support.");
+      Console.WriteLine();
+      WaitForKey();
+      return 1;
+    }
+  }
 
+  static int Run()
+  {
     Console.WriteLine();
     Console.WriteLine("  CloudFab Speckle Connector Installer");
     Console.WriteLine("  =====================================");
     Console.WriteLine();
-    Console.WriteLine($"  Target Revit version: {version}");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("  IMPORTANT: Please close all Revit instances before proceeding.");
+    Console.ResetColor();
     Console.WriteLine();
 
     string exeDir = AppContext.BaseDirectory;
     string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
+    // Detect mode: multi-version (subdirectories named 20XX) or single-version (baked-in metadata)
+    string[] versionDirs = Directory.GetDirectories(exeDir)
+      .Select(Path.GetFileName)
+      .Where(d => d.Length == 4 && d.StartsWith("20") && int.TryParse(d, out _))
+      .OrderBy(d => d)
+      .ToArray();
+
+    if (versionDirs.Length > 0)
+    {
+      return InstallMultiple(exeDir, appData, versionDirs);
+    }
+
+    // Fallback: single-version mode (legacy layout with Connector/ and Kit/ next to exe)
+    string version = Assembly.GetExecutingAssembly()
+      .GetCustomAttributes<AssemblyMetadataAttribute>()
+      .FirstOrDefault(a => a.Key == "RevitVersion")?.Value;
+
+    if (version == null)
+    {
+      Error("Installation folders are missing.");
+      Console.WriteLine("  Please extract the entire ZIP archive before running the installer.");
+      Console.WriteLine();
+      WaitForKey();
+      return 1;
+    }
+
+    Console.WriteLine($"  Target Revit version: {version}");
+    Console.WriteLine();
+
+    bool ok = InstallVersion(exeDir, appData, version);
+
+    Console.WriteLine();
+    if (ok)
+    {
+      Console.ForegroundColor = ConsoleColor.Green;
+      Console.WriteLine("  Installation complete!");
+      Console.ResetColor();
+      Console.WriteLine();
+      Console.WriteLine($"  Connector: {Path.Combine(appData, "Autodesk", "Revit", "Addins", version)}");
+      Console.WriteLine($"  Kit:       {Path.Combine(appData, "Speckle", "Kits", "Objects")}");
+      Console.WriteLine();
+      Console.WriteLine("  Restart Revit to load the connector.");
+    }
+    else
+    {
+      Console.ForegroundColor = ConsoleColor.Red;
+      Console.WriteLine("  Installation failed. See errors above.");
+      Console.ResetColor();
+    }
+
+    Console.WriteLine();
+    WaitForKey();
+    return ok ? 0 : 1;
+  }
+
+  static int InstallMultiple(string exeDir, string appData, string[] versions)
+  {
+    Console.WriteLine($"  Installing for Revit versions: {string.Join(", ", versions)}");
+    Console.WriteLine();
+
+    int installed = 0;
+    int failed = 0;
+
+    foreach (string version in versions)
+    {
+      string versionDir = Path.Combine(exeDir, version);
+      Console.WriteLine($"  -- Revit {version} ------------------------------------------------");
+
+      try
+      {
+        if (InstallVersion(versionDir, appData, version))
+        {
+          installed++;
+        }
+        else
+        {
+          failed++;
+          Warn($"Revit {version} installation had errors (see above).");
+        }
+      }
+      catch (IOException ex)
+      {
+        failed++;
+        Error($"Revit {version}: {ex.Message}");
+        Console.WriteLine("  Files may be locked. Make sure Revit is closed.");
+      }
+      catch (UnauthorizedAccessException ex)
+      {
+        failed++;
+        Error($"Revit {version}: {ex.Message}");
+        Console.WriteLine("  Access denied. Make sure Revit is closed.");
+      }
+
+      Console.WriteLine();
+    }
+
+    // ── Summary ───────────────────────────────────────────────────
+    Console.WriteLine("  -- Summary --------------------------------------------------");
+    Console.WriteLine();
+
+    if (installed > 0)
+    {
+      Console.ForegroundColor = ConsoleColor.Green;
+      Console.WriteLine($"  Successfully installed for {installed} Revit version(s).");
+      Console.ResetColor();
+    }
+
+    if (failed > 0)
+    {
+      Console.ForegroundColor = ConsoleColor.Yellow;
+      Console.WriteLine($"  {failed} version(s) had errors. Close Revit and try again.");
+      Console.ResetColor();
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("  Restart Revit to load the connector.");
+    Console.WriteLine();
+
+    WaitForKey();
+    return failed > 0 ? 1 : 0;
+  }
+
+  static bool InstallVersion(string baseDir, string appData, string version)
+  {
+    bool success = true;
+
     // ── Part 1: Connector files ──────────────────────────────────
-    string connectorSrc = Path.Combine(exeDir, "Connector");
+    string connectorSrc = Path.Combine(baseDir, "Connector");
     if (!Directory.Exists(connectorSrc))
     {
-      Error("Connector\\ folder not found next to installer.");
-      return 1;
+      Error($"Connector\\ folder not found for Revit {version}.");
+      return false;
     }
 
     string addinsDir = Path.Combine(appData, "Autodesk", "Revit", "Addins", version);
@@ -47,21 +192,34 @@ class Program
     }
 
     // Copy SpeckleRevit2 folder (all connector DLLs)
+    // Clean destination first to remove stale DLLs from previous installs
     string speckleRevitSrc = Path.Combine(connectorSrc, "SpeckleRevit2");
     if (Directory.Exists(speckleRevitSrc))
     {
       string speckleRevitDest = Path.Combine(addinsDir, "SpeckleRevit2");
+      if (Directory.Exists(speckleRevitDest))
+      {
+        // Safety: only clean if this looks like our install (contains our main DLL)
+        bool isOurDir = File.Exists(Path.Combine(speckleRevitDest, "SpeckleConnectorRevit.dll"))
+                     || File.Exists(Path.Combine(speckleRevitDest, "DesktopUI2.dll"));
+        if (isOurDir)
+        {
+          // Delete only files in the directory (not subdirectories we don't own)
+          foreach (string file in Directory.GetFiles(speckleRevitDest))
+            File.Delete(file);
+        }
+      }
       int copied = CopyDirectory(speckleRevitSrc, speckleRevitDest);
       Console.WriteLine($"  [OK] SpeckleRevit2\\ ({copied} files) -> Addins\\{version}\\SpeckleRevit2\\");
     }
     else
     {
-      Error("Connector\\SpeckleRevit2\\ folder not found.");
-      return 1;
+      Error($"Connector\\SpeckleRevit2\\ folder not found for Revit {version}.");
+      success = false;
     }
 
     // ── Part 2: Kit files (Objects DLLs + templates) ─────────────
-    string kitSrc = Path.Combine(exeDir, "Kit");
+    string kitSrc = Path.Combine(baseDir, "Kit");
     if (Directory.Exists(kitSrc))
     {
       string kitDest = Path.Combine(appData, "Speckle", "Kits", "Objects");
@@ -74,21 +232,14 @@ class Program
       Warn("No Kit\\ folder found — skipping Objects kit files.");
     }
 
-    // ── Done ─────────────────────────────────────────────────────
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("  Installation complete!");
-    Console.ResetColor();
-    Console.WriteLine();
-    Console.WriteLine($"  Connector: {addinsDir}");
-    if (Directory.Exists(kitSrc))
-      Console.WriteLine($"  Kit:       {Path.Combine(appData, "Speckle", "Kits", "Objects")}");
-    Console.WriteLine();
-    Console.WriteLine("  Restart Revit to load the connector.");
-    Console.WriteLine();
+    if (success)
+    {
+      Console.ForegroundColor = ConsoleColor.Green;
+      Console.WriteLine($"  Revit {version} — installed successfully.");
+      Console.ResetColor();
+    }
 
-    WaitForKey();
-    return 0;
+    return success;
   }
 
   static int CopyDirectory(string src, string dest)
@@ -115,7 +266,6 @@ class Program
     Console.ForegroundColor = ConsoleColor.Red;
     Console.WriteLine($"  ERROR: {msg}");
     Console.ResetColor();
-    WaitForKey();
   }
 
   static void Warn(string msg)
