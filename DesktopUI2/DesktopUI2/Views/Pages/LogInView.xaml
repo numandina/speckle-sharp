@@ -54,7 +54,7 @@
 
 
           <TextBlock TextAlignment="Center">
-            👋 Hello and welcome!&#10;&#10;Please log in to your Speckle account:
+            👋 Hello and welcome!&#10;&#10;Please log in to your account:
           </TextBlock>
           <Button
             Margin="15,40,15,15"

@@ -93,7 +93,7 @@
             CornerRadius="40"
             IsDefault="True"
             IsEnabled="{Binding Progress.IsProgressing, Converter={x:Static BoolConverters.Not}, FallbackValue=True}"
-            ToolTip.Tip="Send the current model to Speckle">
+            ToolTip.Tip="Send the current model to CloudBridge">
             <Button.Content>
               <StackPanel
                 Margin="10"

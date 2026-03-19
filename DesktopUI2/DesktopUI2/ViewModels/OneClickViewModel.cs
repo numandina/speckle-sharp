@@ -41,7 +41,7 @@ public class OneClickViewModel : ReactiveObject, IRoutableViewModel
   {
     SendClicked = true;
     Progress = new ProgressViewModel();
-    Progress.ProgressTitle = "Sending to Speckle 🚀...";
+    Progress.ProgressTitle = "Sending to CloudBridge...";
     Progress.IsProgressing = true;
 
     try

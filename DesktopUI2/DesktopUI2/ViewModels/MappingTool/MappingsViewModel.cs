@@ -56,7 +56,7 @@ public class MappingsViewModel : ViewModelBase, IScreen, IDialogHost
     }
   }
 
-  public string TitleFull => "Speckle Mappings";
+  public string TitleFull => "CloudBridge Mappings";
 
   public MappingsBindings Bindings { get; private set; } = new DummyMappingsBindings();
 
@@ -293,7 +293,7 @@ public class MappingsViewModel : ViewModelBase, IScreen, IDialogHost
         () =>
           Dialogs.ShowMapperDialog(
             "No types available",
-            "The selected project does not contain any Revit types.\nMake sure to send Project Information > Families & Types from Revit\nusing the latest version of the connector.\n\n👉 And no worries, you can keep using Speckle Mapper with default types!",
+            "The selected project does not contain any Revit types.\nMake sure to send Project Information > Families & Types from Revit\nusing the latest version of the connector.\n\n👉 And no worries, you can keep using CloudBridge Mapper with default types!",
             Material.Dialog.Icons.DialogIconKind.Info
           )
       );

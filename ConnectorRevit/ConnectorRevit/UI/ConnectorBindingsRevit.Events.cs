@@ -29,7 +29,7 @@ public partial class ConnectorBindingsRevit
       await APIContext
         .Run(app =>
         {
-          using (Transaction t = new(CurrentDoc.Document, "Speckle Write State"))
+          using (Transaction t = new(CurrentDoc.Document, "CloudBridge Write State"))
           {
             t.Start();
             StreamStateManager.WriteStreamStateList(CurrentDoc.Document, streams);
@@ -165,7 +165,7 @@ public partial class ConnectorBindingsRevit
       }
 
       var progress = new ProgressViewModel();
-      progress.ProgressTitle = "Sending to Speckle 🚀";
+      progress.ProgressTitle = "Sending to CloudBridge 🚀";
       progress.IsProgressing = true;
 
       var dialog = new QuickOpsDialog();

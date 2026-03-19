@@ -31,7 +31,7 @@ class Program
   static int Run()
   {
     Console.WriteLine();
-    Console.WriteLine("  CloudFab Speckle Connector Installer");
+    Console.WriteLine("  CloudBridge Installer");
     Console.WriteLine("  =====================================");
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Yellow;
@@ -180,41 +180,41 @@ class Program
     Directory.CreateDirectory(addinsDir);
 
     // Copy .addin manifest
-    string addinSrc = Path.Combine(connectorSrc, "SpeckleRevit2.addin");
+    string addinSrc = Path.Combine(connectorSrc, "CloudBridge.addin");
     if (File.Exists(addinSrc))
     {
-      File.Copy(addinSrc, Path.Combine(addinsDir, "SpeckleRevit2.addin"), overwrite: true);
-      Console.WriteLine($"  [OK] SpeckleRevit2.addin -> Addins\\{version}\\");
+      File.Copy(addinSrc, Path.Combine(addinsDir, "CloudBridge.addin"), overwrite: true);
+      Console.WriteLine($"  [OK] CloudBridge.addin -> Addins\\{version}\\");
     }
     else
     {
-      Warn("SpeckleRevit2.addin not found in Connector\\");
+      Warn("CloudBridge.addin not found in Connector\\");
     }
 
-    // Copy SpeckleRevit2 folder (all connector DLLs)
+    // Copy CloudBridge folder (all connector DLLs)
     // Clean destination first to remove stale DLLs from previous installs
-    string speckleRevitSrc = Path.Combine(connectorSrc, "SpeckleRevit2");
-    if (Directory.Exists(speckleRevitSrc))
+    string cloudBridgeSrc = Path.Combine(connectorSrc, "CloudBridge");
+    if (Directory.Exists(cloudBridgeSrc))
     {
-      string speckleRevitDest = Path.Combine(addinsDir, "SpeckleRevit2");
-      if (Directory.Exists(speckleRevitDest))
+      string cloudBridgeDest = Path.Combine(addinsDir, "CloudBridge");
+      if (Directory.Exists(cloudBridgeDest))
       {
         // Safety: only clean if this looks like our install (contains our main DLL)
-        bool isOurDir = File.Exists(Path.Combine(speckleRevitDest, "SpeckleConnectorRevit.dll"))
-                     || File.Exists(Path.Combine(speckleRevitDest, "DesktopUI2.dll"));
+        bool isOurDir = File.Exists(Path.Combine(cloudBridgeDest, "CloudBridgeConnectorRevit.dll"))
+                     || File.Exists(Path.Combine(cloudBridgeDest, "DesktopUI2.dll"));
         if (isOurDir)
         {
           // Delete only files in the directory (not subdirectories we don't own)
-          foreach (string file in Directory.GetFiles(speckleRevitDest))
+          foreach (string file in Directory.GetFiles(cloudBridgeDest))
             File.Delete(file);
         }
       }
-      int copied = CopyDirectory(speckleRevitSrc, speckleRevitDest);
-      Console.WriteLine($"  [OK] SpeckleRevit2\\ ({copied} files) -> Addins\\{version}\\SpeckleRevit2\\");
+      int copied = CopyDirectory(cloudBridgeSrc, cloudBridgeDest);
+      Console.WriteLine($"  [OK] CloudBridge\\ ({copied} files) -> Addins\\{version}\\CloudBridge\\");
     }
     else
     {
-      Error($"Connector\\SpeckleRevit2\\ folder not found for Revit {version}.");
+      Error($"Connector\\CloudBridge\\ folder not found for Revit {version}.");
       success = false;
     }
 

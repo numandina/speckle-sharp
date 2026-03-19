@@ -8,8 +8,8 @@
   It is intended to hold any common information shared by all (or most) projects in the repository.
   -->
   <PropertyGroup Label="Company Info">
-    <Authors>Speckle</Authors>
-    <Company>Speckle</Company>
+    <Authors>CloudFab</Authors>
+    <Company>CloudFab</Company>
     <Copyright>Copyright (c) AEC Systems Ltd</Copyright>
   </PropertyGroup>
 
@@ -113,7 +113,7 @@
     <!-- Package info -->
     <PackageVersion Condition="$(PackageVersion) == ''">$(Version)</PackageVersion>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageTags>speckle</PackageTags>
+    <PackageTags>cloudbridge</PackageTags>
     <PackageProjectUrl>https://speckle.systems/</PackageProjectUrl>
     <PackageIcon>logo.png</PackageIcon>
     

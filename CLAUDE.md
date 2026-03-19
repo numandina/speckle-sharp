@@ -33,7 +33,7 @@ Building ConnectorRevitXXXX in Debug automatically copies to (example for 2025):
 
 | Component | Destination |
 |---|---|
-| Connector DLLs + `.addin` | `%APPDATA%\Autodesk\Revit\Addins\2025\SpeckleRevit2\` |
+| Connector DLLs + `.addin` | `%APPDATA%\Autodesk\Revit\Addins\2025\CloudBridge\` |
 | `Objects.Converter.Revit2025.dll` | `%APPDATA%\Speckle\Kits\Objects\` |
 | `Objects.dll` | `%APPDATA%\Speckle\Kits\Objects\` |
 | Revit family templates | `%APPDATA%\Speckle\Kits\Objects\Templates\Revit\2025\` |
@@ -67,11 +67,11 @@ Output: `dist\CloudFabRevit{version}\`.
 
 | Source (next to exe) | Destination |
 |---|---|
-| `Connector\SpeckleRevit2.addin` | `%APPDATA%\Autodesk\Revit\Addins\{version}\` |
-| `Connector\SpeckleRevit2\` (DLLs) | `%APPDATA%\Autodesk\Revit\Addins\{version}\SpeckleRevit2\` |
+| `Connector\CloudBridge.addin` | `%APPDATA%\Autodesk\Revit\Addins\{version}\` |
+| `Connector\CloudBridge\` (DLLs) | `%APPDATA%\Autodesk\Revit\Addins\{version}\CloudBridge\` |
 | `Kit\` (Objects.dll, converter, templates) | `%APPDATA%\Speckle\Kits\Objects\` |
 
-The installer auto-detects mode: if it sees `20XX/` subdirectories next to the exe, it installs all of them (multi-version). Otherwise falls back to baked-in `AssemblyMetadataAttribute` (single-version). Safety: only deletes stale DLLs in `SpeckleRevit2\` if our DLLs are present; never touches other Revit add-ins.
+The installer auto-detects mode: if it sees `20XX/` subdirectories next to the exe, it installs all of them (multi-version). Otherwise falls back to baked-in `AssemblyMetadataAttribute` (single-version). Safety: only deletes stale DLLs in `CloudBridge\` if our DLLs are present; never touches other Revit add-ins.
 
 ### Build script pitfalls
 

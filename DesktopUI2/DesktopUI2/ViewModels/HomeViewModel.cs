@@ -48,7 +48,7 @@ public class HomeViewModel : ReactiveObject, IRoutableViewModel
   private ConnectorBindings Bindings;
 
   // is there a better way to do this?
-  private bool _showLegacyConnectorWarning = true;
+  private bool _showLegacyConnectorWarning = false;
   public bool ShowLegacyConnectorWarning
   {
     get => _showLegacyConnectorWarning;

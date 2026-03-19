@@ -28,7 +28,7 @@ public class App : Application
     catch { }
 
     AvaloniaXamlLoader.Load(this);
-    Name = "Speckle";
+    Name = "CloudBridge";
   }
 
   public override void OnFrameworkInitializationCompleted()

@@ -79,9 +79,9 @@ public class App : IExternalApplication
       var converterPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Speckle", "Kits", "Objects", $"Objects.Converter.Revit{GetRevitVersion()}.dll");
       var converterTime = File.Exists(converterPath) ? File.GetLastWriteTime(converterPath) : DateTime.MinValue;
       var latestTime = connectorTime > converterTime ? connectorTime : converterTime;
-      new TaskDialog("CloudFab Speckle")
+      new TaskDialog("CloudBridge")
       {
-        MainContent = $"CloudFab Speckle plugin loaded.\nLatest build: {latestTime:yyyy-MM-dd HH:mm:ss}"
+        MainContent = $"CloudBridge plugin loaded.\nLatest build: {latestTime:yyyy-MM-dd HH:mm:ss}"
       }.Show();
 
       return Result.Succeeded;
@@ -98,7 +98,7 @@ public class App : IExternalApplication
     }
     catch (Exception ex)
     {
-      eventEmitter.EmitError(new("Failed to load Speckle app", ex));
+      eventEmitter.EmitError(new("Failed to load CloudBridge", ex));
       NotifyUserOfErrorStartingConnector(ex);
       throw;
     }
@@ -160,7 +160,7 @@ public class App : IExternalApplication
     }
     catch (Exception ex) when (!ex.IsFatal())
     {
-      SpeckleLog.Logger.Fatal(ex, "Failed to load Speckle app");
+      SpeckleLog.Logger.Fatal(ex, "Failed to load CloudBridge");
       NotifyUserOfErrorStartingConnector(ex);
     }
   }
@@ -203,7 +203,7 @@ public class App : IExternalApplication
     }
     catch (Exception ex) when (!ex.IsFatal())
     {
-      SpeckleLog.Logger.Fatal(ex, "Failed to load Speckle app");
+      SpeckleLog.Logger.Fatal(ex, "Failed to load CloudBridge");
       NotifyUserOfErrorStartingConnector(ex);
     }
   }
@@ -241,7 +241,7 @@ public class App : IExternalApplication
 
   private void InitializeUiPanel(UIControlledApplication application)
   {
-    string tabName = "Speckle";
+    string tabName = "CloudBridge";
     try
     {
       application.CreateRibbonTab(tabName);
@@ -258,7 +258,7 @@ public class App : IExternalApplication
       throw;
     }
 
-    var specklePanel = application.CreateRibbonPanel(tabName, "Speckle (Legacy)");
+    var specklePanel = application.CreateRibbonPanel(tabName, "CloudBridge");
 
     string path = typeof(App).Assembly.Location;
 
@@ -266,8 +266,8 @@ public class App : IExternalApplication
     var speckleButton2 =
       specklePanel.AddItem(
         new PushButtonData(
-          "Speckle 2",
-          "Speckle (Legacy)",
+          "CloudBridge",
+          "CloudBridge",
           typeof(App).Assembly.Location,
           typeof(SpeckleRevitCommand).FullName
         )
@@ -278,7 +278,7 @@ public class App : IExternalApplication
       speckleButton2.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo16.png", path);
       speckleButton2.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
       speckleButton2.ToolTipImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
-      speckleButton2.ToolTip = "Speckle Connector for Revit";
+      speckleButton2.ToolTip = "CloudBridge for Revit";
       speckleButton2.AvailabilityClassName = typeof(CmdAvailabilityViews).FullName;
       speckleButton2.SetContextualHelp(new ContextualHelp(ContextualHelpType.Url, "https://speckle.systems"));
     }
@@ -331,7 +331,7 @@ public class App : IExternalApplication
       helpPulldown.AddPushButton(
         new PushButtonData("manager", "Manager", typeof(App).Assembly.Location, typeof(ManagerCommand).FullName)
       ) as PushButton;
-    manager.ToolTip = "Manage accounts and connectors. Opens SpeckleManager.";
+    manager.ToolTip = "Manage accounts and connectors.";
     manager.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo16.png", path);
     manager.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
   }
@@ -377,12 +377,12 @@ public class App : IExternalApplication
 
   internal static void NotifyUserOfErrorStartingConnector(Exception ex)
   {
-    using var td = new TaskDialog("Error loading Speckle");
+    using var td = new TaskDialog("Error loading CloudBridge");
 
     td.MainContent =
       ex is KitException
         ? ex.Message
-        : $"Oh no! Something went wrong while loading Speckle, please report it on the forum:\n\n{ex.Message}";
+        : $"Oh no! Something went wrong while loading CloudBridge, please report it on the forum:\n\n{ex.Message}";
 
     td.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Ask for help on our Community Forum");
 

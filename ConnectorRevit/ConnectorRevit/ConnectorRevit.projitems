@@ -64,7 +64,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)SpeckleRevit2.addin">
+    <None Include="$(MSBuildThisFileDirectory)CloudBridge.addin">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>

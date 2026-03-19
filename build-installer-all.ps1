@@ -83,23 +83,23 @@ foreach ($ver in $Versions) {
   }
 
   if (Test-Path $releaseDir) {
-    $addinFile = Join-Path $releaseDir "SpeckleRevit2.addin"
+    $addinFile = Join-Path $releaseDir "CloudBridge.addin"
     Copy-Item $addinFile $connectorDist
-    Copy-Item (Join-Path $releaseDir "SpeckleRevit2") (Join-Path $connectorDist "SpeckleRevit2") -Recurse
+    Copy-Item (Join-Path $releaseDir "CloudBridge") (Join-Path $connectorDist "CloudBridge") -Recurse
   } else {
     $binDir = Join-Path $solutionDir "ConnectorRevit$ver\bin\Release\win-x64"
-    $addinFile = Get-ChildItem $binDir -Filter "SpeckleRevit2.addin" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+    $addinFile = Get-ChildItem $binDir -Filter "CloudBridge.addin" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
     if (-not $addinFile -or -not (Test-Path $addinFile)) {
-      Write-Error "Could not find SpeckleRevit2.addin for Revit $ver"
+      Write-Error "Could not find CloudBridge.addin for Revit $ver"
       exit 1
     }
     Copy-Item $addinFile $connectorDist
-    $speckleRevitDist = Join-Path $connectorDist "SpeckleRevit2"
-    New-Item $speckleRevitDist -ItemType Directory | Out-Null
-    Copy-Item "$binDir\*" $speckleRevitDist -Recurse -Exclude "*.addin"
+    $cloudBridgeDist = Join-Path $connectorDist "CloudBridge"
+    New-Item $cloudBridgeDist -ItemType Directory | Out-Null
+    Copy-Item "$binDir\*" $cloudBridgeDist -Recurse -Exclude "*.addin"
   }
 
-  $connFileCount = (Get-ChildItem (Join-Path $connectorDist "SpeckleRevit2") -Recurse -File).Count
+  $connFileCount = (Get-ChildItem (Join-Path $connectorDist "CloudBridge") -Recurse -File).Count
   Write-Host "        Gathered $connFileCount connector files"
 
   # ── Gather Kit files ─────────────────────────────────────────
@@ -156,7 +156,7 @@ Write-Host "  Contents:"
 Write-Host '    CloudFabRevitInstaller.exe   <- recipient runs this'
 foreach ($ver in $Versions) {
   Write-Host ('    ' + $ver + '\')
-  Write-Host '      Connector\  (SpeckleRevit2.addin + DLLs)'
+  Write-Host '      Connector\  (CloudBridge.addin + DLLs)'
   Write-Host '      Kit\        (Objects DLLs + templates)'
 }
 Write-Host ''

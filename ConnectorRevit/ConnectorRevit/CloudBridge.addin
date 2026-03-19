@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>CloudBridge for Revit</Name>
+    <Description>CloudBridge for Revit</Description>
+    <Assembly>CloudBridge\CloudBridgeConnectorRevit.dll</Assembly>
+    <FullClassName>Speckle.ConnectorRevit.Entry.App</FullClassName>
+    <ClientId>5AE0BD71-CDE6-40DC-8A9B-AB227DE75A52</ClientId>
+    <VendorId>cloudfab</VendorId>
+    <VendorDescription>CloudFab Technologies</VendorDescription>
+  </AddIn>
+</RevitAddIns>

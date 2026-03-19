@@ -91,7 +91,7 @@
             VerticalAlignment="Center"
             Foreground="Gray"
             Kind="InfoCircle"
-            ToolTip.Tip="A version is a snapshot in time&#x0a;of a model.&#x0a;Every time you send to a Speckle model from a connector,&#x0a;a version is created." />
+            ToolTip.Tip="A version is a snapshot in time&#x0a;of a model.&#x0a;Every time you send to a CloudBridge model from a connector,&#x0a;a version is created." />
           <ComboBox
             Grid.Column="3"
             Margin="5,10,0,10"

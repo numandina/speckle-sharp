@@ -130,5 +130,5 @@ internal class ExternalEventHandler<TParameter, TResult> : IExternalEventHandler
     }
   }
 
-  public string GetName() => "SpeckleRevitContextEventHandler";
+  public string GetName() => "CloudBridgeRevitContextEventHandler";
 }

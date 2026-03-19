@@ -376,7 +376,7 @@ public class DirectShapeFreeformViewModel : Schema
 
   private string _selectedCategory = RevitCategory.GenericModel.ToString();
 
-  private string _shapeName = "Speckle Mapper Shape";
+  private string _shapeName = "CloudBridge Mapper Shape";
 
   public DirectShapeFreeformViewModel()
   {

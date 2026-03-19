@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
   <PropertyGroup>
     <RootNamespace>Speckle.ConnectorRevit</RootNamespace>
-    <AssemblyName>SpeckleConnectorRevit</AssemblyName>
+    <AssemblyName>CloudBridgeConnectorRevit</AssemblyName>
     <TargetFramework>net48</TargetFramework>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <RevitFolderName>SpeckleRevit2</RevitFolderName>
+    <RevitFolderName>CloudBridge</RevitFolderName>
     <RevitVersion>2020</RevitVersion>
     <AssemblyTitle>ConnectorRevit</AssemblyTitle>
     <Product>ConnectorRevit</Product>
@@ -37,7 +37,7 @@
 
 
   <Target Name="Clean">
-    <RemoveDir Directories="$(TargetDir);$(ProjectDir)\..\Release\Release2020;$(AppData)\Autodesk\Revit\Addins\2020\SpeckleRevit2" />
+    <RemoveDir Directories="$(TargetDir);$(ProjectDir)\..\Release\Release2020;$(AppData)\Autodesk\Revit\Addins\2020\CloudBridge" />
   </Target>
   <Target Name="AfterBuildMigrated" AfterTargets="Build" Condition="$([MSBuild]::IsOsPlatform('Windows'))">
     <CallTarget Condition="'$(Configuration)' == 'Debug' AND '$(IsDesktopBuild)' == true" Targets="AfterBuildDebug" />

@@ -103,7 +103,7 @@ public class TransactionManager : IDisposable
       {
         SpeckleLog.Logger.Fatal(
           exception,
-          "The Revit API could not resolve {numUniqueErrors} unique errors and {numTotalErrors} total errors when trying to commit the Speckle model. The whole transaction is being rolled back.",
+          "The Revit API could not resolve {numUniqueErrors} unique errors and {numTotalErrors} total errors when trying to commit the CloudBridge model. The whole transaction is being rolled back.",
           numUniqueErrors,
           numTotalErrors
         );
@@ -111,7 +111,7 @@ public class TransactionManager : IDisposable
 
       throw exception
         ?? new SpeckleException(
-          $"The Revit API could not resolve {numUniqueErrors} unique errors and {numTotalErrors} total errors when trying to commit the Speckle model. The whole transaction is being rolled back."
+          $"The Revit API could not resolve {numUniqueErrors} unique errors and {numTotalErrors} total errors when trying to commit the CloudBridge model. The whole transaction is being rolled back."
         );
     }
   }

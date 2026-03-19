@@ -67,32 +67,32 @@ if (-not (Test-Path $releaseDir)) {
 
 if (Test-Path $releaseDir) {
   # Use the Release staging output
-  $addinFile = Join-Path $releaseDir "SpeckleRevit2.addin"
-  $dllFolder = Join-Path $releaseDir "SpeckleRevit2"
+  $addinFile = Join-Path $releaseDir "CloudBridge.addin"
+  $dllFolder = Join-Path $releaseDir "CloudBridge"
 } else {
   # Fall back to build output directory
   $binDir = Join-Path $solutionDir "ConnectorRevit$RevitVersion\bin\Release\win-x64"
-  $addinFile = Get-ChildItem $binDir -Filter "SpeckleRevit2.addin" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+  $addinFile = Get-ChildItem $binDir -Filter "CloudBridge.addin" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
   $dllFolder = $binDir
 }
 
 if (-not $addinFile -or -not (Test-Path $addinFile)) {
-  Write-Error "Could not find SpeckleRevit2.addin in release output"
+  Write-Error "Could not find CloudBridge.addin in release output"
   exit 1
 }
 
 Copy-Item $addinFile $connectorDist
 
-if (Test-Path (Join-Path $releaseDir "SpeckleRevit2")) {
-  Copy-Item (Join-Path $releaseDir "SpeckleRevit2") (Join-Path $connectorDist "SpeckleRevit2") -Recurse
+if (Test-Path (Join-Path $releaseDir "CloudBridge")) {
+  Copy-Item (Join-Path $releaseDir "CloudBridge") (Join-Path $connectorDist "CloudBridge") -Recurse
 } else {
-  # bin output doesn't have SpeckleRevit2 subfolder — the DLLs ARE the output
-  $speckleRevitDist = Join-Path $connectorDist "SpeckleRevit2"
-  New-Item $speckleRevitDist -ItemType Directory | Out-Null
-  Copy-Item "$dllFolder\*" $speckleRevitDist -Recurse -Exclude "*.addin"
+  # bin output doesn't have CloudBridge subfolder — the DLLs ARE the output
+  $cloudBridgeDist = Join-Path $connectorDist "CloudBridge"
+  New-Item $cloudBridgeDist -ItemType Directory | Out-Null
+  Copy-Item "$dllFolder\*" $cloudBridgeDist -Recurse -Exclude "*.addin"
 }
 
-$connectorFileCount = (Get-ChildItem (Join-Path $connectorDist "SpeckleRevit2") -Recurse -File).Count
+$connectorFileCount = (Get-ChildItem (Join-Path $connectorDist "CloudBridge") -Recurse -File).Count
 Write-Host "        Connector: $connectorFileCount files"
 
 # --- Kit files (Objects DLLs + templates) ---
@@ -147,8 +147,8 @@ Write-Host ""
 Write-Host "  Contents:"
 Write-Host "    CloudFabRevitInstaller.exe   <- recipient runs this"
 Write-Host "    Connector\"
-Write-Host "      SpeckleRevit2.addin"
-Write-Host "      SpeckleRevit2\             ($connectorFileCount files)"
+Write-Host "      CloudBridge.addin"
+Write-Host "      CloudBridge\             ($connectorFileCount files)"
 Write-Host "    Kit\"
 Write-Host "      Objects.dll"
 Write-Host "      Objects.Converter.Revit$RevitVersion.dll"

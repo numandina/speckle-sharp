@@ -139,7 +139,7 @@ public partial class ConnectorBindingsRevit
         Values = new List<string>() { DetailLevelCoarse, DetailLevelMedium, DetailLevelFine },
         Selection = DetailLevelFine,
         Description =
-          "Determines the level of detail in which meshes are sent to Speckle. \n\nThis feature is in alpha because primitive objects such as curves, \nwhich are commonly found in coarse or medium detail level element representations, are not supported yet."
+          "Determines the level of detail in which meshes are sent to CloudBridge. \n\nThis feature is in alpha because primitive objects such as curves, \nwhich are commonly found in coarse or medium detail level element representations, are not supported yet."
       },
     };
   }

@@ -23,7 +23,7 @@
             FontSize="18"
             FontWeight="Bold"
             Foreground="{DynamicResource PrimaryHueMidBrush}"
-            Text="SPECKLE SCHEDULER" />
+            Text="CLOUDBRIDGE SCHEDULER" />
           <TextBlock
             Classes="SpeckleFont"
             FontSize="18"
@@ -46,7 +46,7 @@
         HorizontalContentAlignment="Stretch"
         Classes="Mini">
         <StackPanel>
-          <TextBlock Text="Speckle Scheduler lets you schedule when to automatically send to a project based on a few triggers." TextWrapping="Wrap" />
+          <TextBlock Text="CloudBridge Scheduler lets you schedule when to automatically send to a project based on a few triggers." TextWrapping="Wrap" />
           <TextBlock
             Margin="0,15,0,0"
             IsVisible="{Binding HasSavedSenders, Converter={x:Static BoolConverters.Not}}"
@@ -90,7 +90,7 @@
           VerticalAlignment="Center"
           Foreground="Gray"
           Kind="InfoCircle"
-          ToolTip.Tip="A version is a snapshot in time&#x0a;of the data inside a model.&#x0a;Every time you send to Speckle from a connector,&#x0a;a version is created." />
+          ToolTip.Tip="A version is a snapshot in time&#x0a;of the data inside a model.&#x0a;Every time you send to CloudBridge from a connector,&#x0a;a version is created." />
         <TextBlock Text="Trigger:" />
       </StackPanel>
 
