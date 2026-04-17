@@ -143,7 +143,7 @@ $publishDir = Join-Path $distDir "__publish"
 dotnet publish $installerProj -c Release -o $publishDir --nologo -v q
 if ($LASTEXITCODE -ne 0) { Write-Error "Installer publish failed"; exit 1 }
 
-Copy-Item (Join-Path $publishDir "CloudFabRevitInstaller.exe") $distDir
+Copy-Item (Join-Path $publishDir "CloudFabInstaller.exe") $distDir
 Remove-Item $publishDir -Recurse -Force
 Write-Host "  OK"
 

@@ -44,34 +44,43 @@ Revit 2026 removed `ElementId.IntegerValue`. All call sites use `id.GetIntegerVa
 
 ## Installer (distribute to others)
 
-`Installer/` contains a self-contained C# console app that copies the connector + kit files to the right AppData locations on a recipient's machine.
+`Installer/` contains a self-contained C# console app (`CloudFabInstaller.exe`) that copies connector + kit files to the right AppData locations on a recipient's machine.
 
-**Multi-version build (all Revit versions in one installer):**
+### Universal build (all connectors)
 
 ```powershell
-.\build-installer-all.ps1                          # builds 2023, 2024, 2025, 2026
+.\build-installer-universal.ps1                            # build everything (except Dynamo)
+.\build-installer-universal.ps1 -Skip AutoCAD,Civil3D      # skip certain connectors
+.\build-installer-universal.ps1 -IncludeDynamo              # include Dynamo (needs local DLL)
+.\build-installer-universal.ps1 -RevitVersions 2025,2026   # specific Revit versions only
+```
+
+Output: `dist\CloudFab\`. Zip and send. Recipient runs `CloudFabInstaller.exe`.
+
+**Supported connectors and install targets:**
+
+| Connector | Versions | Install Path |
+|---|---|---|
+| Revit | 2023–2026 | `%APPDATA%\Autodesk\Revit\Addins\{year}\` |
+| AutoCAD | 2021–2025 | `%APPDATA%\Autodesk\ApplicationPlugins\Speckle2AutoCAD{year}\` |
+| Civil 3D | 2021–2025 | `%APPDATA%\Autodesk\ApplicationPlugins\Speckle2Civil3D{year}\` |
+| Rhino | 7, 8 | `%APPDATA%\McNeel\Rhinoceros\{ver}.0\Plug-ins\SpeckleConnectorRhino\` |
+| Grasshopper | 7, 8 | `%APPDATA%\Grasshopper\Libraries\SpeckleConnectorGrasshopper{ver}\` |
+| Navisworks | 2020–2025 | `%APPDATA%\Autodesk\ApplicationPlugins\Speckle.ConnectorNavisworks.bundle\` |
+| Dynamo | single | `%APPDATA%\Dynamo\Dynamo Revit\*\packages\SpeckleDynamo2\` (scans existing installs) |
+| Objects Kit | shared | `%APPDATA%\Speckle\Kits\Objects\` |
+
+The installer auto-detects what's in the dist folder: connector-type folders (`Revit/`, `AutoCAD/`, etc.) with version subfolders. Also backward-compatible with the old Revit-only layout (year folders directly next to exe). Connectors that fail to build are skipped — the installer only installs what's present.
+
+### Revit-only build
+
+```powershell
+.\build-installer-all.ps1                          # builds Revit 2023–2026
 .\build-installer-all.ps1 -Versions 2023,2025      # specific versions only
+.\build-installer.ps1 -RevitVersion 2025            # single version (legacy)
 ```
 
-Output: `dist\CloudFabRevit\` (~156 MB zipped). Zip and send. Recipient extracts, runs `CloudFabRevitInstaller.exe`, all versions install at once.
-
-**Single-version build (legacy):**
-
-```powershell
-.\build-installer.ps1 -RevitVersion 2025   # or 2024, 2026
-```
-
-Output: `dist\CloudFabRevit{version}\`.
-
-**What the installer copies (per version):**
-
-| Source (next to exe) | Destination |
-|---|---|
-| `Connector\CloudBridge.addin` | `%APPDATA%\Autodesk\Revit\Addins\{version}\` |
-| `Connector\CloudBridge\` (DLLs) | `%APPDATA%\Autodesk\Revit\Addins\{version}\CloudBridge\` |
-| `Kit\` (Objects.dll, converter, templates) | `%APPDATA%\Speckle\Kits\Objects\` |
-
-The installer auto-detects mode: if it sees `20XX/` subdirectories next to the exe, it installs all of them (multi-version). Otherwise falls back to baked-in `AssemblyMetadataAttribute` (single-version). Safety: only deletes stale DLLs in `CloudBridge\` if our DLLs are present; never touches other Revit add-ins.
+Output: `dist\CloudFabRevit\` (multi) or `dist\CloudFabRevit{version}\` (single).
 
 ### Build script pitfalls
 
@@ -130,14 +139,17 @@ powershell.exe -NoProfile -Command 'Copy-Item "$env:APPDATA\Speckle\Kits\Objects
 ### 4. Distribute to 3rd party
 
 ```bash
-# All versions (2023-2026) in one installer:
+# All connectors (Revit, AutoCAD, Civil 3D, Rhino, Grasshopper, Navisworks):
+powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build-installer-universal.ps1'
+
+# Revit only (all versions 2023-2026):
 powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build-installer-all.ps1'
 
-# Single version:
+# Revit single version:
 powershell.exe -NoProfile -Command 'cd "C:\Users\RAMBAGE\speckle-sharp"; .\build-installer.ps1 -RevitVersion 2025'
 ```
 
-Output: `dist\CloudFabRevit\` (multi) or `dist\CloudFabRevit2025\` (single). Zip and send. Recipient runs `CloudFabRevitInstaller.exe`, restarts Revit, done.
+Output: `dist\CloudFab\` (universal), `dist\CloudFabRevit\` (Revit multi), or `dist\CloudFabRevit2025\` (single). Zip and send. Recipient runs `CloudFabInstaller.exe`, restarts apps, done.
 
 ## Connection Rotation & Flip (Unity → Revit)
 

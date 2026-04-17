@@ -6,8 +6,8 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
-    <AssemblyName>CloudFabRevitInstaller</AssemblyName>
-    <RootNamespace>CloudFabRevitInstaller</RootNamespace>
+    <AssemblyName>CloudFabInstaller</AssemblyName>
+    <RootNamespace>CloudFabInstaller</RootNamespace>
     <!-- Single-version mode: build script passes -p:RevitVersion=2025 -->
     <!-- Multi-version mode: no RevitVersion needed (installer auto-detects version dirs) -->
     <RevitVersion Condition="'$(RevitVersion)' == ''"></RevitVersion>
