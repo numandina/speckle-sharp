@@ -9,6 +9,9 @@
     <Import_RootNamespace>ConnectorRevit</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\ConstructobotLogo64.png" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\Btn_Previous3_p.png" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\Btn_Next3_p.png" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\docs.png" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\docs16.png" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)Assets\docs32.png" />
@@ -42,6 +45,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Entry\SchedulerCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Entry\SpeckleRevitCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Entry\HelpCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Entry\ClashNavigatorCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)RevitVersionHelper.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Revit\FamilyLoadOption.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TypeMapping\HostTypeContainer.cs" />

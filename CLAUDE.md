@@ -106,8 +106,14 @@ After building, copy `Objects.dll` from `%APPDATA%\Speckle\Kits\Objects\Objects.
 **Close Revit AND Unity before building.** Both lock DLLs in `%APPDATA%\Speckle\Kits\Objects\` — Revit locks the converter DLLs, Unity locks them via its Speckle modules. The `CopyToKitFolder` post-build xcopy will fail with exit code 4 ("user-mapped section open") if either is running.
 
 ```bash
-# Step 1: Build the Connector (deploys to Revit addins folder)
-powershell.exe -NoProfile -Command 'dotnet build "C:\Users\RAMBAGE\speckle-sharp\ConnectorRevit\ConnectorRevit2025\ConnectorRevit2025.csproj" -c Debug -p:SolutionDir="C:\Users\RAMBAGE\speckle-sharp\"'
+# Step 1: Build the Connector (should auto-deploy to Revit addins folder)
+powershell.exe -NoProfile -Command 'dotnet build "C:\Users\RAMBAGE\speckle-sharp\ConnectorRevit\ConnectorRevit2025\ConnectorRevit2025.csproj" -c Debug -p:SolutionDir="C:\Users\RAMBAGE\speckle-sharp\" -p:IsDesktopBuild=true'
+
+# Step 1b (auto-deploy fallback): The AfterBuildDebug MSBuild target sometimes silently skips
+# — DLL gets built in bin\Debug\win-x64\ but nothing copies to %APPDATA%\Autodesk\Revit\Addins\2025\.
+# Passing -p:IsDesktopBuild=true does NOT reliably fix it. If the Addins folder is empty or stale
+# after a successful build, copy manually:
+powershell.exe -NoProfile -Command '$src="C:\Users\RAMBAGE\speckle-sharp\ConnectorRevit\ConnectorRevit2025\bin\Debug\win-x64"; $dst="$env:APPDATA\Autodesk\Revit\Addins\2025"; if(!(Test-Path "$dst\CloudBridge")){New-Item -ItemType Directory -Path "$dst\CloudBridge" -Force | Out-Null}; Copy-Item "$src\*" "$dst\CloudBridge" -Recurse -Force -Exclude "*.addin"; Copy-Item "$src\*.addin" $dst -Force'
 
 # Step 2: Build the Converter (deploys to Speckle Kits folder)
 # Use CopyToKitFolder=false if the xcopy post-build still fails, then manually copy.
@@ -218,6 +224,25 @@ The converter distinguishes screws from clips via `connectedElementId == null` �
 ## Startup Popup
 
 `ConnectorRevit/Entry/App.cs` shows both Connector and Converter build timestamps on startup. Converter path is resolved via `SpecklePathProvider.InstallApplicationDataPath + /Kits/Objects/Objects.Converter.Revit2025.dll`.
+
+## CloudBridge Tab (ribbon layout)
+
+The `CloudBridge` tab (created in `App.cs:InitializeUiPanel`) has two panels — 4 top-level ribbon items total:
+
+- **`Send/Receive`** (formerly "CloudBridge"): **Connector** (formerly "CloudBridge" button; icon `ConstructobotLogo64.png`) opens the DUI2 dockable pane; **Scheduler** opens the scheduled-send window. The Help & Resources pulldown (Forum/Tutorials/Docs/Manager) is commented out (`/* ... */`) near the bottom of `InitializeUiPanel` — preserved for restoration.
+- **`Clash Review`** (added in `App.cs:InitializeClashNavigatorPanel`): **Previous** (`Btn_Previous3_p.png`) and **Next** (`Btn_Next3_p.png`) buttons — implemented in `ConnectorRevit/Entry/ClashNavigatorCommands.cs`, cycle through clash-marker elements in the active document.
+
+**Why the Connector icon was swapped:** the original `logo16.png` / `logo32.png` assets in `ConnectorRevit/ConnectorRevit/Assets/` are yellow-warning-triangle images (not the Speckle logo). `ConstructobotLogo64.png` replaces them for the Connector button; the original PNGs are still on disk but unreferenced.
+
+**New PNG assets** in `ConnectorRevit/ConnectorRevit/Assets/` (embedded via `ConnectorRevit.projitems`): `ConstructobotLogo64.png`, `Btn_Previous3_p.png`, `Btn_Next3_p.png`. Revit ribbon wants 16×16 (`Image`) and 32×32 (`LargeImage`) — single-size source files are reused at both slots and Revit downscales. Replace with crisp 16+32 variants if icons look blurry at compact ribbon width.
+
+**Clash Navigator filter:** `BuiltInParameter.ALL_MODEL_MARK` starting with `"ClashSphere_"`. Unity writes this on each truss-clash sphere via `WallStudFixer.cs` (static counter `clashSphereCounter`, reset at the top of `NewEngine.FrameWalls`). Spheres ship to Revit exclusively on the `issues` branch — see `SpeckleHandler.cs:2119-2179`.
+
+**Clash Navigator navigation:** `UIDocument.ShowElements(id)` + `Selection.SetElementIds({id})`. The spheres' per-instance description is written to `Comments`, so once selected it appears in Revit's Properties panel without extra UI.
+
+**Tab sharing:** `CreateRibbonTab("CloudBridge")` in `InitializeClashNavigatorPanel` is wrapped in try/catch (ArgumentException) — expected to throw on every run because `InitializeUiPanel` has already created the tab. The catch is purely defensive; the panel is still added via `CreateRibbonPanel("CloudBridge", "Clash Review")`.
+
+**Caveat:** the clash-sphere prefab's `speckle_type` is currently `Objects.BuiltElements.Level:...RevitLevel` (legacy value from whatever element the prefab was copied from). If spheres arrive in Revit as Levels they may not be selectable in 3D views — verify by receiving the `issues` branch and confirming they render as a selectable 3D element. Fix by updating the prefab's SpeckleProperties speckle_type to something geometric (e.g. `Objects.BuiltElements.Revit.DirectShape`) if needed.
 
 ## Relationship to cloudfab-unity
 

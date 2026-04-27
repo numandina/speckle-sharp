@@ -258,7 +258,7 @@ public class App : IExternalApplication
       throw;
     }
 
-    var specklePanel = application.CreateRibbonPanel(tabName, "CloudBridge");
+    var specklePanel = application.CreateRibbonPanel(tabName, "Send/Receive");
 
     string path = typeof(App).Assembly.Location;
 
@@ -267,7 +267,7 @@ public class App : IExternalApplication
       specklePanel.AddItem(
         new PushButtonData(
           "CloudBridge",
-          "CloudBridge",
+          "Connector",
           typeof(App).Assembly.Location,
           typeof(SpeckleRevitCommand).FullName
         )
@@ -275,9 +275,9 @@ public class App : IExternalApplication
 
     if (speckleButton2 != null)
     {
-      speckleButton2.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo16.png", path);
-      speckleButton2.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
-      speckleButton2.ToolTipImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
+      speckleButton2.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.ConstructobotLogo64.png", path);
+      speckleButton2.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.ConstructobotLogo64.png", path);
+      speckleButton2.ToolTipImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.ConstructobotLogo64.png", path);
       speckleButton2.ToolTip = "CloudBridge for Revit";
       speckleButton2.AvailabilityClassName = typeof(CmdAvailabilityViews).FullName;
       speckleButton2.SetContextualHelp(new ContextualHelp(ContextualHelpType.Url, "https://speckle.systems"));
@@ -298,6 +298,7 @@ public class App : IExternalApplication
       schedulerButton.SetContextualHelp(new ContextualHelp(ContextualHelpType.Url, "https://speckle.systems"));
     }
 
+    /*
     PulldownButton helpPulldown =
       specklePanel.AddItem(new PulldownButtonData("Help&Resources", "Help & Resources")) as PulldownButton;
     helpPulldown.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.help16.png", path);
@@ -334,6 +335,56 @@ public class App : IExternalApplication
     manager.ToolTip = "Manage accounts and connectors.";
     manager.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo16.png", path);
     manager.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.logo32.png", path);
+    */
+
+    InitializeClashNavigatorPanel(application, path);
+  }
+
+  private void InitializeClashNavigatorPanel(UIControlledApplication application, string path)
+  {
+    const string cloudFabTab = "CloudBridge";
+    try
+    {
+      application.CreateRibbonTab(cloudFabTab);
+    }
+    catch (Autodesk.Revit.Exceptions.ArgumentException)
+    {
+      // Tab already exists (e.g. created by the standalone CloudFab add-in). Safe to share.
+    }
+
+    var clashPanel = application.CreateRibbonPanel(cloudFabTab, "Clash Review");
+
+    var prevClash =
+      clashPanel.AddItem(
+        new PushButtonData(
+          "PreviousClash",
+          "Previous",
+          typeof(App).Assembly.Location,
+          typeof(PreviousClashCommand).FullName
+        )
+      ) as PushButton;
+    if (prevClash != null)
+    {
+      prevClash.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.Btn_Previous3_p.png", path);
+      prevClash.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.Btn_Previous3_p.png", path);
+      prevClash.ToolTip = "Select and zoom to the previous clash sphere (Mark starts with 'ClashSphere_').";
+    }
+
+    var nextClash =
+      clashPanel.AddItem(
+        new PushButtonData(
+          "NextClash",
+          "Next",
+          typeof(App).Assembly.Location,
+          typeof(NextClashCommand).FullName
+        )
+      ) as PushButton;
+    if (nextClash != null)
+    {
+      nextClash.Image = LoadPngImgSource("Speckle.ConnectorRevit.Assets.Btn_Next3_p.png", path);
+      nextClash.LargeImage = LoadPngImgSource("Speckle.ConnectorRevit.Assets.Btn_Next3_p.png", path);
+      nextClash.ToolTip = "Select and zoom to the next clash sphere (Mark starts with 'ClashSphere_').";
+    }
   }
 
   public Result OnShutdown(UIControlledApplication application)
