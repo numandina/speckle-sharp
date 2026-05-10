@@ -19,6 +19,14 @@ Fork of [speckle-sharp](https://github.com/specklesystems/speckle-sharp) (v2/leg
 4. **`Objects/Converters/ConverterRevit/ConverterRevitShared/FileLogger.cs`** (new) — Debug file logger writing to `%LOCALAPPDATA%\Speckle\Logs\Revit-WP\`.
 5. **`Objects/Converters/ConverterRevit/ConverterRevitShared/ConverterRevitShared.projitems`** — Added FileLogger.cs to shared project.
 
+## Version Bump (every change)
+
+**Bump the version in `Directory.Build.props` on every change to the plugin.** The version is shown in the Revit ribbon header (e.g. `CLOUDBRIDGE for Revit 2025 v2.6.0.0`) and is the only signal users have that they're running a new build. If you forget to bump, recipients of the installer cannot tell which version they have.
+
+- Edit both `Version` and `FileVersion` in `Directory.Build.props` (lines ~109–110). Keep them in sync — `AssemblyVersion` derives from `FileVersion`, and `Bindings.ConnectorVersion` reads the assembly's `Version` (so the UI shows `FileVersion`).
+- Scheme: `Major.Minor.Patch` for `Version`, `Major.Minor.Patch.Build` for `FileVersion`. Bump patch for fixes/small changes, minor for features, major for breaking changes.
+- Current: `2.6.0` / `2.6.0.0`. (Historical placeholder was `2.0.999.x` — never incremented; do not regress to that.)
+
 ## Building
 
 Open `ConnectorRevit\ConnectorRevit.sln` in Rider. Build **ConnectorRevit2025** or **ConnectorRevit2026** in **Debug** configuration.

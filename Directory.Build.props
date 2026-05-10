@@ -105,9 +105,9 @@
   </PropertyGroup>
 
   <PropertyGroup Label="Package Config">
-    <!-- Version info -->
-    <Version Condition="$(Version) == ''">2.0.999-local</Version>
-    <FileVersion Condition="$(FileVersion) == ''">2.0.999.0000</FileVersion>
+    <!-- Version info — BUMP ON EVERY CHANGE. See CLAUDE.md § "Version Bump". -->
+    <Version Condition="$(Version) == ''">2.6.0</Version>
+    <FileVersion Condition="$(FileVersion) == ''">2.6.0.0</FileVersion>
     <AssemblyVersion Condition="$(AssemblyVersion) == ''">$(FileVersion)</AssemblyVersion>
     
     <!-- Package info -->
