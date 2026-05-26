@@ -724,8 +724,9 @@ public static class AccountManager
 
       var account = await CreateAccount(accessCode, challenge, server).ConfigureAwait(false);
 
-      //if the account already exists it will not be added again
-      s_accountStorage.SaveObject(account.id, JsonConvert.SerializeObject(account));
+      // REPLACE INTO so an existing row (same email+server hash) is overwritten with the fresh OAuth credentials.
+      // SaveObject would silently no-op (INSERT OR IGNORE) and the new token would be discarded.
+      s_accountStorage.UpdateObject(account.id, JsonConvert.SerializeObject(account));
       SpeckleLog.Logger.Debug("Finished adding account {accountId} for {serverUrl}", account.id, server);
     }
     catch (SpeckleAccountManagerException ex)
