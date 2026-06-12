@@ -209,29 +209,30 @@ For quick checks, group by family and count True/False to verify payload mapping
 
 ## Screw Rotation & Elevation (Unity → Revit)
 
-Screws are now `Structural Connections` (not `Generic Models`) and flow through the same `SetConnectionProps` / `RevitInstanceToNative` pipeline as clips. They are WorkPlaneBased `RevitInstance` objects — no host ID, no flip, no manualAngles.
+Screws are `Structural Connections` and flow through the same `SetConnectionProps` / `RevitInstanceToNative` pipeline as clips, identified by `connectedElementId == null` (`hostlessWpb`). No host ID, no flip, no manualAngles.
 
-**Family requirement:** The Revit screw family must have "Work-Plane-Based" checked in the Family Editor. Without this, elevation from host stays 0.
+**Family requirement:** the Revit screw family must have **Work Plane-Based** checked in the Family Editor (Family Category and Parameters). The payload's `placementType` is only Unity's claim — Revit obeys the family's own checkbox. The converter reads the real `Family.FamilyPlacementType` per instance (logged as `realFamPlacement:`) and branches:
 
-### Rotation (3 cases)
+### Work-plane-based family (full behavior — position + yaw + tilt)
 
-The converter distinguishes screws from clips via `connectedElementId == null` → applies `RotateElement` instead of ReferencePlane direction encoding.
+A geometric `SketchPlane` (`Plane.CreateByOriginAndBasis`) is created exactly through the placement point and passed as host. The family frame maps family-X→basisX, family-Y→basisY, family-Z→normal; **the screw's shank is authored along family-X** (field-calibrated 2026-06-12):
 
-1. **Default (horizontal):** `RotateElement` around BasisZ by yaw. ReferencePlane is created with yaw=0 (hosting only).
-2. **faceUp:** `TryRotateAngle(InPlaneX, +PI/2)` tilts screw 90° upward. Yaw is skipped (`faceTilted` flag).
-3. **faceDown:** `TryRotateAngle(InPlaneX, -PI/2)` tilts screw 90° downward. Yaw is skipped.
+1. **Plain yaw:** horizontal plane, basis = default frame rotated about Z by yaw. Reproduces "place at default + rotate in plan" exactly.
+2. **faceUp:** `basisX = +Z` (shank straight up). 3. **faceDown:** `basisX = −Z`.
 
-`TryRotateAngle` is a generalized version of `TryRotate90` that accepts an arbitrary angle. `TryRotate90` still exists as a wrapper.
+No `RotateElement` afterwards (rotating a WPB instance out of its plane → Revit deletes it **silently at commit**, after the last log line). Hand/facing/mirror corrections are skipped (payload flags are stale prefab captures). `INSTANCE_FREE_HOST_OFFSET_PARAM` / `INSTANCE_ELEVATION_PARAM` are forced to 0 after `SetInstanceParameters` — the plane already passes through the exact point.
 
-**Why RotateElement for default yaw:** Screws typically have only 0° and 180° yaw (facing opposite sides of a stud). These values produce geometrically equivalent ReferencePlane lines (±Y), so the plane approach can't distinguish them.
+### Level-based family (fallback — position + yaw only, tilt impossible)
 
-### Elevation
+If the family is not work-plane-based, plane hosts are silently dropped and the instance re-hosts on the level at elevation 0. The converter instead places on the level and sets **Offset-from-Host = point Z − level elevation** (after `SetInstanceParameters`), then yaws via `RotateElement` about Z. **faceUp/faceDown cannot work here:** rotation about any horizontal axis "succeeds" via API but the level constraint re-flattens the instance at regenerate — verified empirically with two different axes.
 
-`INSTANCE_ELEVATION_PARAM` is set explicitly via `get_Parameter()` after `SetInstanceParameters`. The generic `SetInstanceParameters` path skips it because the `ParametersMap` `IsReadOnly` filter excludes it for WorkPlaneBased instances.
+### Duplicate screws (Unity side)
+
+Coincident same-family screws (back-to-back clips sharing a hole position) arrive as identical instances and Revit silently deletes one of each pair (observed: 416 sent → 372 surviving). `NewEngine.Prepare2Revit` dedupes them before export (1mm position quantization + family name).
 
 ## Startup Popup
 
-`ConnectorRevit/Entry/App.cs` shows both Connector and Converter build timestamps on startup. Converter path is resolved via `SpecklePathProvider.InstallApplicationDataPath + /Kits/Objects/Objects.Converter.Revit2025.dll`.
+`ConnectorRevit/Entry/App.cs` shows Connector and Converter **versions and build timestamps** separately on startup (they are built and deployed separately — a stale converter is otherwise invisible). Converter path is resolved under `%APPDATA%\Speckle\Kits\Objects\`.
 
 ## CloudBridge Tab (ribbon layout)
 

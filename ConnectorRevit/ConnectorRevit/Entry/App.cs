@@ -74,14 +74,25 @@ public class App : IExternalApplication
 
       InitializeUiPanel(application);
 
-      // Confirms the correct build is loaded
-      var connectorTime = File.GetLastWriteTime(typeof(App).Assembly.Location);
-      var converterPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Speckle", "Kits", "Objects", $"Objects.Converter.Revit{GetRevitVersion()}.dll");
-      var converterTime = File.Exists(converterPath) ? File.GetLastWriteTime(converterPath) : DateTime.MinValue;
-      var latestTime = connectorTime > converterTime ? connectorTime : converterTime;
+      // Confirms the correct build is loaded — connector and converter are built and
+      // deployed separately, so show both to make a stale one visible.
+      var connectorPath = typeof(App).Assembly.Location;
+      var connectorVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(connectorPath).FileVersion;
+      var connectorTime = File.GetLastWriteTime(connectorPath);
+      var converterPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Speckle",
+        "Kits",
+        "Objects",
+        $"Objects.Converter.Revit{GetRevitVersion()}.dll"
+      );
+      var converterInfo = File.Exists(converterPath)
+        ? $"v{System.Diagnostics.FileVersionInfo.GetVersionInfo(converterPath).FileVersion} ({File.GetLastWriteTime(converterPath):yyyy-MM-dd HH:mm:ss})"
+        : "NOT FOUND";
       new TaskDialog("CloudBridge")
       {
-        MainContent = $"CloudBridge plugin loaded.\nLatest build: {latestTime:yyyy-MM-dd HH:mm:ss}"
+        MainContent =
+          $"CloudBridge plugin loaded.\nConnector: v{connectorVersion} ({connectorTime:yyyy-MM-dd HH:mm:ss})\nConverter: {converterInfo}"
       }.Show();
 
       return Result.Succeeded;
@@ -372,12 +383,7 @@ public class App : IExternalApplication
 
     var nextClash =
       clashPanel.AddItem(
-        new PushButtonData(
-          "NextClash",
-          "Next",
-          typeof(App).Assembly.Location,
-          typeof(NextClashCommand).FullName
-        )
+        new PushButtonData("NextClash", "Next", typeof(App).Assembly.Location, typeof(NextClashCommand).FullName)
       ) as PushButton;
     if (nextClash != null)
     {

@@ -15,6 +15,21 @@ public partial class ConverterRevit
     return docLevels.FirstOrDefault(x => x.Name == name);
   }
 
+  // Renaming a level to a name another level already holds throws "name already in use" and rolls
+  // back the entire receive. Only rename when the target name is free (or already this level's name).
+  private void SetLevelNameIfAvailable(DB.Level level, IEnumerable<DB.Level> docLevels, string name)
+  {
+    if (string.IsNullOrEmpty(name) || level.Name == name)
+    {
+      return;
+    }
+    if (docLevels.Any(l => l.Id != level.Id && l.Name == name))
+    {
+      return;
+    }
+    level.Name = name;
+  }
+
   public DB.Level GetExistingLevelByElevation(IEnumerable<DB.Level> docLevels, double elevation)
   {
     return docLevels.FirstOrDefault(l => Math.Abs(l.Elevation - (double)elevation) < TOLERANCE);
@@ -102,7 +117,7 @@ public partial class ConverterRevit
     {
       revitLevel = existingLevelAlreadyReceived;
 
-      revitLevel.Name = speckleLevel.name;
+      SetLevelNameIfAvailable(revitLevel, docLevels, speckleLevel.name);
       if (Math.Abs(revitLevel.Elevation - (double)speckleLevelElevation) >= TOLERANCE)
       {
         revitLevel.Elevation = speckleLevelElevation;
@@ -130,8 +145,15 @@ public partial class ConverterRevit
     )
     {
       revitLevel = existingLevelWithSameElevation;
-      revitLevel.Name = speckleLevel.name;
+      SetLevelNameIfAvailable(revitLevel, docLevels, speckleLevel.name);
       state = ApplicationObject.State.Updated;
+    }
+    else if (GetExistingLevelByName(docLevels, speckleLevel.name) is DB.Level existingLevelWithSameName)
+    {
+      // A level with this name already exists (at a different elevation/appId); reuse it instead of
+      // authoring a duplicate — Revit rejects duplicate level names and rolls back the whole receive.
+      revitLevel = existingLevelWithSameName;
+      state = ApplicationObject.State.Skipped;
     }
     else
     {

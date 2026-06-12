@@ -1,10 +1,13 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Collections.Generic;
+using System.Linq;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using Objects.BuiltElements.Revit;
+using Objects.Geometry;
 using Objects.GIS;
 using Objects.Organization;
 using Objects.Other;
@@ -19,16 +22,15 @@ using BE = Objects.BuiltElements;
 using BER = Objects.BuiltElements.Revit;
 using BERC = Objects.BuiltElements.Revit.Curve;
 using DB = Autodesk.Revit.DB;
-using STR = Objects.Structural;
-using System.Linq;
 using OG = Objects.Geometry;
 using OR = Objects.Other.Revit;
-using System.Collections.Generic;
-using Objects.Geometry;
+using STR = Objects.Structural;
+
 namespace Objects.Converter.Revit;
-using OG = Objects.Geometry;
+
 using System.Linq;
 using DB = Autodesk.Revit.DB;
+using OG = Objects.Geometry;
 using OR = Objects.Other.Revit;
 
 public partial class ConverterRevit : ISpeckleConverter
@@ -113,15 +115,27 @@ public partial class ConverterRevit : ISpeckleConverter
   /// </summary>
   public Dictionary<string, Objects.Other.Material> Materials { get; private set; } =
     new Dictionary<string, Objects.Other.Material>();
+
   private void DebugLog(string msg)
   {
-    try { Report.Log(msg); } catch { /* ignore UI failures */ }
-    try { FileLogger.Log(msg); } catch { /* ignore IO failures */ }
+    try
+    {
+      Report.Log(msg);
+    }
+    catch
+    { /* ignore UI failures */
+    }
+    try
+    {
+      FileLogger.Log(msg);
+    }
+    catch
+    { /* ignore IO failures */
+    }
   }
 
   public ConverterRevit()
   {
-
     var ver = System.Reflection.Assembly.GetAssembly(typeof(ConverterRevit)).GetName().Version;
     DebugLog($"Using converter: {Name} v{ver}");
 
@@ -129,7 +143,9 @@ public partial class ConverterRevit : ISpeckleConverter
     // FileLogger.SetPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     //   "Speckle","Logs","Revit-WP","latest.txt"));
 
-    FileLogger.Log($"Converter boot. Objects asm: {typeof(Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance).Assembly.Location}");
+    FileLogger.Log(
+      $"Converter boot. Objects asm: {typeof(Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance).Assembly.Location}"
+    );
     Report.Log($"Using converter: {Name} v{ver}");
   }
 
@@ -226,11 +242,11 @@ public partial class ConverterRevit : ISpeckleConverter
     //}
   }
 
-
-
-
   // inside ConverterRevit
-  private static Base CloneAsType(Base src, string fullTypeName /* e.g. "Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance, Speckle.Objects" */)
+  private static Base CloneAsType(
+    Base src,
+    string fullTypeName /* e.g. "Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance, Speckle.Objects" */
+  )
   {
     var t = Type.GetType(fullTypeName, throwOnError: false);
     if (t == null || !typeof(Base).IsAssignableFrom(t))
@@ -243,13 +259,15 @@ public partial class ConverterRevit : ISpeckleConverter
     dst.id = src.id;
 
     // Copy matching public get/set props when names match
-    var sProps = src.GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+    var sProps = src.GetType()
+      .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
     var dProps = t.GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
-                  .ToDictionary(p => p.Name);
+      .ToDictionary(p => p.Name);
 
     foreach (var sp in sProps)
     {
-      if (!sp.CanRead) continue;
+      if (!sp.CanRead)
+        continue;
       if (dProps.TryGetValue(sp.Name, out var dp) && dp.CanWrite)
         dp.SetValue(dst, sp.GetValue(src));
     }
@@ -260,13 +278,18 @@ public partial class ConverterRevit : ISpeckleConverter
 
     return dst;
   }
+
   // REPLACE your WorkPlaneConnectionFamilyToSpeckle with this
-  private Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance WorkPlaneConnectionFamilyToSpeckle(DB.FamilyInstance fi, out List<string> notes)
+  private Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance WorkPlaneConnectionFamilyToSpeckle(
+    DB.FamilyInstance fi,
+    out List<string> notes
+  )
   {
     notes = new List<string>();
 
     var baseObj = FamilyInstanceToSpeckle(fi, out var innerNotes) as Objects.Other.Revit.RevitInstance;
-    if (innerNotes?.Count > 0) notes.AddRange(innerNotes);
+    if (innerNotes?.Count > 0)
+      notes.AddRange(innerNotes);
     if (baseObj == null)
       throw new Exception("FamilyInstanceToSpeckle did not return OR.RevitInstance");
 
@@ -279,7 +302,8 @@ public partial class ConverterRevit : ISpeckleConverter
     // copy dyanmic members except reserved
     foreach (var kv in baseObj.GetMembers(Speckle.Core.Models.DynamicBaseMemberType.All))
     {
-      if (_reservedDynKeys.Contains(kv.Key)) continue;
+      if (_reservedDynKeys.Contains(kv.Key))
+        continue;
       SetPropOrDyn(r, kv.Key, kv.Value);
     }
 
@@ -288,8 +312,7 @@ public partial class ConverterRevit : ISpeckleConverter
       r.levelUniqueId = lvl.UniqueId;
 
     // sketch plane & work plane info
-    var spId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId()
-               ?? DB.ElementId.InvalidElementId;
+    var spId = fi.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId() ?? DB.ElementId.InvalidElementId;
     var sp = spId == DB.ElementId.InvalidElementId ? null : fi.Document.GetElement(spId) as DB.SketchPlane;
 
     r.isWorkPlaneHosted = sp != null;
@@ -304,7 +327,9 @@ public partial class ConverterRevit : ISpeckleConverter
         ScaleToSpeckle(pl.Origin.Y),
         ScaleToSpeckle(pl.Origin.Z)
       )
-      { units = ModelUnits };
+      {
+        units = ModelUnits
+      };
 
       r.workPlane = new Objects.Geometry.Plane(
         origin,
@@ -329,7 +354,9 @@ public partial class ConverterRevit : ISpeckleConverter
         ScaleToSpeckle(tr.Origin.Y),
         ScaleToSpeckle(tr.Origin.Z)
       )
-      { units = ModelUnits };
+      {
+        units = ModelUnits
+      };
 
       r.workPlane = new Objects.Geometry.Plane(
         origin,
@@ -343,8 +370,10 @@ public partial class ConverterRevit : ISpeckleConverter
     double offFt = 0.0;
     var p1 = fi.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM);
     var p2 = fi.get_Parameter(DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM);
-    if (p1 != null) offFt = p1.AsDouble();
-    if (p2 != null) offFt = p2.AsDouble();
+    if (p1 != null)
+      offFt = p1.AsDouble();
+    if (p2 != null)
+      offFt = p2.AsDouble();
     r.hostOffset = ScaleToSpeckle(offFt); // r.hostOffset inherits ModelUnits context
 
     // placement point + rotation
@@ -355,14 +384,18 @@ public partial class ConverterRevit : ISpeckleConverter
         ScaleToSpeckle(lp.Point.Y),
         ScaleToSpeckle(lp.Point.Z)
       )
-      { units = ModelUnits };
+      {
+        units = ModelUnits
+      };
 
       r.rotation = lp.Rotation;
     }
 
     r.mirrored = fi.Mirrored;
-    var f = fi.FacingOrientation; r.facingOrientation = new Objects.Geometry.Vector(f.X, f.Y, f.Z);
-    var h = fi.HandOrientation; r.handOrientation = new Objects.Geometry.Vector(h.X, h.Y, h.Z);
+    var f = fi.FacingOrientation;
+    r.facingOrientation = new Objects.Geometry.Vector(f.X, f.Y, f.Z);
+    var h = fi.HandOrientation;
+    r.handOrientation = new Objects.Geometry.Vector(h.X, h.Y, h.Z);
 
     // nice names + required symbol info
     var symbol = fi.Symbol;
@@ -387,16 +420,19 @@ public partial class ConverterRevit : ISpeckleConverter
 
     // hydrate displayValue names if present
     if (r.displayValue != null)
-      foreach (var m in r.displayValue) m["name"] = niceName;
+      foreach (var m in r.displayValue)
+        m["name"] = niceName;
     else if (r["displayValue"] is IEnumerable<Objects.Geometry.Mesh> dynMeshes)
-      foreach (var m in dynMeshes) m["name"] = niceName;
+      foreach (var m in dynMeshes)
+        m["name"] = niceName;
 
     return r;
   }
 
   private static string SanitizeRevitName(string s)
   {
-    if (string.IsNullOrEmpty(s)) return s;
+    if (string.IsNullOrEmpty(s))
+      return s;
     // conservative blocklist used by Revit name validators
     var bad = new HashSet<char>(":{}[]|;<>?\\\"'=`~".ToCharArray());
     var sb = new System.Text.StringBuilder(s.Length);
@@ -405,17 +441,13 @@ public partial class ConverterRevit : ISpeckleConverter
     return sb.ToString().Trim();
   }
 
-
-
-
-
-
   // helpers
 
   // Find a structural column whose (string) parameter "applicationId" matches the given id.
   private Element FindHostColumnByApplicationId(string appId)
   {
-    if (string.IsNullOrWhiteSpace(appId)) return null;
+    if (string.IsNullOrWhiteSpace(appId))
+      return null;
 
     var columns = new FilteredElementCollector(Doc)
       .OfCategory(BuiltInCategory.OST_StructuralColumns)
@@ -424,9 +456,10 @@ public partial class ConverterRevit : ISpeckleConverter
 
     foreach (var e in columns)
     {
-      var v = GetParamString(e, "applicationId")
-           ?? GetParamString(e, "ApplicationId")
-           ?? GetParamString(e, "SpeckleApplicationId");
+      var v =
+        GetParamString(e, "applicationId")
+        ?? GetParamString(e, "ApplicationId")
+        ?? GetParamString(e, "SpeckleApplicationId");
       if (string.Equals(v, appId, StringComparison.OrdinalIgnoreCase))
         return e;
     }
@@ -436,19 +469,25 @@ public partial class ConverterRevit : ISpeckleConverter
   private static string GetParamString(Element e, string name)
   {
     var p = e.LookupParameter(name);
-    if (p == null) return null;
+    if (p == null)
+      return null;
     try
     {
-      if (p.StorageType == StorageType.String) return p.AsString();
+      if (p.StorageType == StorageType.String)
+        return p.AsString();
       return p.AsValueString(); // fallback for non-string storage
     }
-    catch { return null; }
+    catch
+    {
+      return null;
+    }
   }
 
   private static XYZ ElementCenter(Element e)
   {
     var bb = e.get_BoundingBox(null);
-    if (bb == null) return XYZ.Zero;
+    if (bb == null)
+      return XYZ.Zero;
     return (bb.Min + bb.Max) * 0.5;
   }
 
@@ -475,26 +514,39 @@ public partial class ConverterRevit : ISpeckleConverter
 
 
   // reserved dynamic keys that must never be written
-  private static readonly HashSet<string> _reservedDynKeys = new(StringComparer.OrdinalIgnoreCase)
-{
-  "speckle_type","applicationId","id","units","bbox","__closure",
-  // also skip keys you have typed props for:
-  "family","type","symbol","category","builtInCategory"
-};
+  private static readonly HashSet<string> _reservedDynKeys =
+    new(StringComparer.OrdinalIgnoreCase)
+    {
+      "speckle_type",
+      "applicationId",
+      "id",
+      "units",
+      "bbox",
+      "__closure",
+      // also skip keys you have typed props for:
+      "family",
+      "type",
+      "symbol",
+      "category",
+      "builtInCategory"
+    };
 
   // set strongly-typed property if it exists; convert types if needed.
   // only use dynamic when NO property exists.
   private static void SetPropOrDyn(Base dst, string name, object value)
   {
-    var p = dst.GetType().GetProperty(
-      name,
-      System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+    var p = dst.GetType()
+      .GetProperty(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
 
     if (p != null)
     {
       try
       {
-        if (value == null) { p.SetValue(dst, null); return; }
+        if (value == null)
+        {
+          p.SetValue(dst, null);
+          return;
+        }
 
         var target = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
         var v = value;
@@ -518,23 +570,10 @@ public partial class ConverterRevit : ISpeckleConverter
       return;
     }
 
-    if (_reservedDynKeys.Contains(name)) return; // don’t shadow known keys
+    if (_reservedDynKeys.Contains(name))
+      return; // don’t shadow known keys
     dst[name] = value;
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   public void SetConverterSettings(object settings)
   {
@@ -551,9 +590,14 @@ public partial class ConverterRevit : ISpeckleConverter
       if (@object is DB.Element e)
       {
         Report.Log($"[CTS] pick id:{e.UniqueId} cat:{e.Category?.Name} bic:{e.Category?.Id.GetIntegerValue()}");
-        if (@object is DB.FamilyInstance fi2 && fi2.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel)
+        if (
+          @object is DB.FamilyInstance fi2
+          && fi2.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel
+        )
         {
-          FileLogger.Log($"[CTS-DIAG] GenericModel id:{fi2.UniqueId} fam:{fi2.Symbol?.Family?.Name} placement:{fi2.Symbol?.Family?.FamilyPlacementType}");
+          FileLogger.Log(
+            $"[CTS-DIAG] GenericModel id:{fi2.UniqueId} fam:{fi2.Symbol?.Family?.Name} placement:{fi2.Symbol?.Family?.FamilyPlacementType}"
+          );
         }
       }
     }
@@ -570,17 +614,18 @@ public partial class ConverterRevit : ISpeckleConverter
       case DB.DirectShape o:
         returnObject = DirectShapeToSpeckle(o);
         break;
-      case DB.FamilyInstance o
-  when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_StructConnections:
+      case DB.FamilyInstance o when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_StructConnections:
         DebugLog($"[CTS] hit struct-conn: {o.UniqueId}");
         returnObject = WorkPlaneConnectionFamilyToSpeckle(o, out notes);
         DebugLog($"[CTS] OUT type: {returnObject?.speckle_type}");
         break;
 
       case DB.FamilyInstance o
-  when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel
-    && (o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.WorkPlaneBased
-     || o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.OneLevelBased):
+        when o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel
+          && (
+            o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.WorkPlaneBased
+            || o.Symbol?.Family?.FamilyPlacementType == DB.FamilyPlacementType.OneLevelBased
+          ):
         DebugLog($"[CTS] hit generic-model WPB: {o.UniqueId}");
         returnObject = WorkPlaneConnectionFamilyToSpeckle(o, out notes);
         DebugLog($"[CTS] OUT type: {returnObject?.speckle_type}");
@@ -588,7 +633,9 @@ public partial class ConverterRevit : ISpeckleConverter
 
       case DB.FamilyInstance o:
         if (o.Category?.Id.GetIntegerValue() == (int)DB.BuiltInCategory.OST_GenericModel)
-          DebugLog($"[CTS] FALLTHROUGH generic-model: {o.UniqueId} fam:{o.Symbol?.Family?.Name} placement:{o.Symbol?.Family?.FamilyPlacementType}");
+          DebugLog(
+            $"[CTS] FALLTHROUGH generic-model: {o.UniqueId} fam:{o.Symbol?.Family?.Name} placement:{o.Symbol?.Family?.FamilyPlacementType}"
+          );
         returnObject = FamilyInstanceToSpeckle(o, out notes);
         break;
       case DB.Floor o:
@@ -1122,6 +1169,7 @@ public partial class ConverterRevit : ISpeckleConverter
         return null;
     }
   }
+
   // inside RevitInstanceToNative(...) after you've got `familyInstance` and called Doc.Regenerate()
 
   public object ConvertToNativeDisplayable(Base @base)
@@ -1134,36 +1182,48 @@ public partial class ConverterRevit : ISpeckleConverter
     return nativeObject;
   }
 
-
-
-
-
-
-
-  public ApplicationObject RevitInstanceToNative(Objects.Other.Revit.RevitInstance instance, ApplicationObject appObj = null)
+  public ApplicationObject RevitInstanceToNative(
+    Objects.Other.Revit.RevitInstance instance,
+    ApplicationObject appObj = null
+  )
   {
     // --- local helpers to read dynamic/typed flags safely ---
     static bool TryGetDynBool(Base b, string key, out bool value)
     {
       value = false;
-      if (b == null) return false;
+      if (b == null)
+        return false;
       if (!b.GetMembers(Speckle.Core.Models.DynamicBaseMemberType.All).TryGetValue(key, out var raw) || raw == null)
         return false;
 
       switch (raw)
       {
-        case bool bb: value = bb; return true;
-        case string s when bool.TryParse(s, out var bv): value = bv; return true;
-        case string s2 when int.TryParse(s2, out var iv): value = iv != 0; return true;
-        case int i: value = i != 0; return true;
-        case long l: value = l != 0; return true;
-        case double d: value = Math.Abs(d) > 1e-9; return true;
-        default: return false;
+        case bool bb:
+          value = bb;
+          return true;
+        case string s when bool.TryParse(s, out var bv):
+          value = bv;
+          return true;
+        case string s2 when int.TryParse(s2, out var iv):
+          value = iv != 0;
+          return true;
+        case int i:
+          value = i != 0;
+          return true;
+        case long l:
+          value = l != 0;
+          return true;
+        case double d:
+          value = Math.Abs(d) > 1e-9;
+          return true;
+        default:
+          return false;
       }
     }
     static bool WantsVerticalFlip(Base b)
     {
-      bool typed = false, hasTyped = false;
+      bool typed = false,
+        hasTyped = false;
       if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
       {
         typed = rwpi.flipVertical; // if the local kit has the property
@@ -1191,9 +1251,9 @@ public partial class ConverterRevit : ISpeckleConverter
 
     // ---- resolve symbol ----
     var def =
-        instance.typedDefinition as Objects.BuiltElements.Revit.RevitSymbolElementType
-        ?? instance.definition as Objects.BuiltElements.Revit.RevitSymbolElementType
-        ?? instance["symbol"] as Objects.BuiltElements.Revit.RevitSymbolElementType;
+      instance.typedDefinition as Objects.BuiltElements.Revit.RevitSymbolElementType
+      ?? instance.definition as Objects.BuiltElements.Revit.RevitSymbolElementType
+      ?? instance["symbol"] as Objects.BuiltElements.Revit.RevitSymbolElementType;
 
     DB.FamilySymbol familySymbol = null;
     bool isExactMatch = false;
@@ -1211,8 +1271,10 @@ public partial class ConverterRevit : ISpeckleConverter
 
     if (familySymbol == null)
     {
-      appObj.Update(status: ApplicationObject.State.Failed,
-                    logItem: $"Family/type not found. family='{instance["family"] ?? "<null>"}' type='{instance["type"] ?? "<null>"}'.");
+      appObj.Update(
+        status: ApplicationObject.State.Failed,
+        logItem: $"Family/type not found. family='{instance["family"] ?? "<null>"}' type='{instance["type"] ?? "<null>"}'."
+      );
       return appObj;
     }
 
@@ -1234,13 +1296,19 @@ public partial class ConverterRevit : ISpeckleConverter
     // ---- placement type ----
     string placementStr = (def?.placementType ?? instance["placementType"] as string) ?? string.Empty;
     var placement = Enum.TryParse<DB.FamilyPlacementType>(placementStr, true, out var placementType)
-                      ? placementType
-                      : familySymbol.Family?.FamilyPlacementType ?? DB.FamilyPlacementType.Invalid;
+      ? placementType
+      : familySymbol.Family?.FamilyPlacementType ?? DB.FamilyPlacementType.Invalid;
 
     bool hasPlacementPoint = instance["placementPoint"] is Objects.Geometry.Point;
     bool hasTransform = instance.transform != null;
     bool isWorkPlaneBased = placement == DB.FamilyPlacementType.WorkPlaneBased;
     bool forceNamedWorkPlane = isWorkPlaneBased && (hasPlacementPoint || hasTransform);
+    bool hostlessWpb = forceNamedWorkPlane && instance["connectedElementId"] == null;
+    bool screwPlaneHosted = false;
+    bool screwLevelHosted = false;
+    // The payload's placementType is what Unity claims; Revit obeys the family's own
+    // Work Plane-Based checkbox. Level-based screw families silently drop a plane host.
+    var realFamPlacement = familySymbol.Family?.FamilyPlacementType ?? DB.FamilyPlacementType.Invalid;
 
     // ---- yaw (radians) from payload ----
     double? yawRad = null;
@@ -1249,9 +1317,12 @@ public partial class ConverterRevit : ISpeckleConverter
     if (!yawRad.HasValue && instance["rotation"] is double rotVal)
       yawRad = rotVal;
 
-    DebugLog($"[RVTIN] instance:{instance.applicationId} fam:'{familySymbol.FamilyName}' type:'{familySymbol.Name}' " +
-             $"placement:{placement} (raw:'{placementStr}') level:{level?.Name ?? "<null>"} " +
-             $"hasPlacementPoint:{hasPlacementPoint} hasTransform:{hasTransform} WPBased:{isWorkPlaneBased} yaw(rad):{(yawRad?.ToString() ?? "<none>")}");
+    DebugLog(
+      $"[RVTIN] instance:{instance.applicationId} fam:'{familySymbol.FamilyName}' type:'{familySymbol.Name}' "
+        + $"placement:{placement} (raw:'{placementStr}') level:{level?.Name ?? "<null>"} "
+        + $"hasPlacementPoint:{hasPlacementPoint} hasTransform:{hasTransform} WPBased:{isWorkPlaneBased} yaw(rad):{(yawRad?.ToString() ?? "<none>")} "
+        + $"realFamPlacement:{familySymbol.Family?.FamilyPlacementType}"
+    );
 
     // ---------------- Insertion point (external -> internal) ----------------
     XYZ insertionExt;
@@ -1261,11 +1332,7 @@ public partial class ConverterRevit : ISpeckleConverter
     {
       var pp = (Objects.Geometry.Point)instance["placementPoint"];
       var u = UnitsOrModel(pp.units);
-      insertionExt = new XYZ(
-        ScaleToNative(pp.x, u),
-        ScaleToNative(pp.y, u),
-        ScaleToNative(pp.z, u)
-      );
+      insertionExt = new XYZ(ScaleToNative(pp.x, u), ScaleToNative(pp.y, u), ScaleToNative(pp.z, u));
       usedPlacementPoint = true;
       DebugLog($"[RVTIN] placementPoint external (scaled): {insertionExt}  units:{u}");
     }
@@ -1301,7 +1368,9 @@ public partial class ConverterRevit : ISpeckleConverter
         else
         {
           familyInstance = (DB.FamilyInstance)docObj;
-          DebugLog($"[RVTIN] Updating existing uid:{familyInstance.UniqueId} host:{familyInstance.Host?.Id.GetIntegerValue()}");
+          DebugLog(
+            $"[RVTIN] Updating existing uid:{familyInstance.UniqueId} host:{familyInstance.Host?.Id.GetIntegerValue()}"
+          );
 
           if (forceNamedWorkPlane)
           {
@@ -1311,14 +1380,20 @@ public partial class ConverterRevit : ISpeckleConverter
           }
           else
           {
-            var newPt = new XYZ(insertionPoint.X, insertionPoint.Y, (familyInstance.Location as DB.LocationPoint).Point.Z);
+            var newPt = new XYZ(
+              insertionPoint.X,
+              insertionPoint.Y,
+              (familyInstance.Location as DB.LocationPoint).Point.Z
+            );
             (familyInstance.Location as DB.LocationPoint).Point = newPt;
             if ((familyInstance.Location as DB.LocationPoint).Point != newPt)
               (familyInstance.Location as DB.LocationPoint).Point = newPt;
 
             if (isExactMatch && revitType.Id.GetIntegerValue() != familySymbol.Id.GetIntegerValue())
             {
-              DebugLog($"[RVTIN] Type change (old:{revitType.Id.GetIntegerValue()}, new:{familySymbol.Id.GetIntegerValue()})");
+              DebugLog(
+                $"[RVTIN] Type change (old:{revitType.Id.GetIntegerValue()}, new:{familySymbol.Id.GetIntegerValue()})"
+              );
               familyInstance.ChangeTypeId(familySymbol.Id);
             }
 
@@ -1342,78 +1417,151 @@ public partial class ConverterRevit : ISpeckleConverter
         DB.ReferencePlane rp = null;
         DB.SketchPlane sp = null;
 
-        DB.View viewForRp = Doc.ActiveView;
-        if (viewForRp == null || viewForRp.IsTemplate)
+        bool wantsFaceUp = TryGetDynBool(instance, "faceUp", out var fUpP) && fUpP;
+        bool wantsFaceDown = TryGetDynBool(instance, "faceDown", out var fDnP) && fDnP;
+
+        if (hostlessWpb && realFamPlacement != DB.FamilyPlacementType.WorkPlaneBased)
         {
-          viewForRp = new FilteredElementCollector(Doc)
-                      .OfClass(typeof(DB.ViewPlan))
-                      .Cast<DB.ViewPlan>()
-                      .FirstOrDefault(v => !v.IsTemplate);
+          // Level-based screw family: a plane host would be silently dropped and the
+          // instance re-hosted on the level at the wall base. Place on the level and
+          // drive height via Offset-from-Host instead; yaw/tilt applied via
+          // RotateElement afterwards (legal for level-hosted instances).
+          try
+          {
+            familyInstance = Doc.Create.NewFamilyInstance(
+              insertionPoint,
+              familySymbol,
+              level,
+              DB.Structure.StructuralType.NonStructural
+            );
+            screwLevelHosted = true;
+            DebugLog(
+              $"[RVTIN][SCREW] level-hosted placement (family is {realFamPlacement}); target offset {insertionPoint.Z - level.Elevation}"
+            );
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN][SCREW] level placement failed: {ex.GetType().Name}: {ex.Message}");
+          }
+        }
+        else if (hostlessWpb)
+        {
+          // Screws/welds. View-based ReferencePlanes bind at the view's level, not the
+          // screw's Z — the instance ends up hosted at the wall base with Offset 0 and
+          // the constraint solve drags it to the bottom. A geometric plane through the
+          // insertion point carries position AND yaw/tilt, so no RotateElement follows
+          // (rotating a WPB instance out of its plane makes Revit silently delete it).
+          try
+          {
+            // Family frame maps as: family-X → basisX, family-Y → basisY, family-Z → normal.
+            // The screw's shank is authored along family-X (field-calibrated: on a vertical
+            // plane forcing family-Y up, screws stayed horizontal; on a horizontal plane
+            // they stayed flat).
+            XYZ basisX,
+              basisY;
+            if (wantsFaceUp)
+            {
+              basisX = DB.XYZ.BasisZ;
+              basisY = DB.XYZ.BasisY;
+            }
+            else if (wantsFaceDown)
+            {
+              basisX = DB.XYZ.BasisZ.Negate();
+              basisY = DB.XYZ.BasisY;
+            }
+            else
+            {
+              // default placement frame spun by yaw — identical to the validated
+              // level-path result (place at default, RotateElement about Z)
+              var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, yawRad ?? 0.0);
+              basisX = rotT.OfVector(DB.XYZ.BasisX);
+              basisY = rotT.OfVector(DB.XYZ.BasisY);
+            }
+            var geomPlane = DB.Plane.CreateByOriginAndBasis(insertionPoint, basisX, basisY);
+            sp = DB.SketchPlane.Create(Doc, geomPlane);
+            screwPlaneHosted = true;
+            DebugLog(
+              $"[RVTIN][SCREW] geometric SketchPlane origin:{insertionPoint} basisX:{basisX} faceUp:{wantsFaceUp} faceDown:{wantsFaceDown} yaw:{yawRad}"
+            );
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN][SCREW] geometric SketchPlane failed: {ex.GetType().Name}: {ex.Message}");
+          }
+        }
+        else
+        {
+          DB.View viewForRp = Doc.ActiveView;
+          if (viewForRp == null || viewForRp.IsTemplate)
+          {
+            viewForRp = new FilteredElementCollector(Doc)
+              .OfClass(typeof(DB.ViewPlan))
+              .Cast<DB.ViewPlan>()
+              .FirstOrDefault(v => !v.IsTemplate);
+          }
+
+          try
+          {
+            XYZ freeDir,
+              cut;
+            if (wantsFaceUp)
+            {
+              // Horizontal plane: normal = cross(BasisY, -BasisX) = +Z → screw faces up
+              // freeDir=BasisY matches default screw plane orientation for correct in-plane heading
+              freeDir = DB.XYZ.BasisY;
+              cut = new XYZ(-1, 0, 0);
+              DebugLog("[RVTIN] faceUp: creating horizontal ReferencePlane (normal +Z)");
+            }
+            else if (wantsFaceDown)
+            {
+              // Horizontal plane: normal = cross(BasisY, BasisX) = -Z → screw faces down
+              freeDir = DB.XYZ.BasisY;
+              cut = DB.XYZ.BasisX;
+              DebugLog("[RVTIN] faceDown: creating horizontal ReferencePlane (normal -Z)");
+            }
+            else
+            {
+              // Clips encode rotation in the ReferencePlane direction (includes PI offset).
+              var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, yawRad ?? 0.0);
+              freeDir = rotT.OfVector(DB.XYZ.BasisY);
+              cut = DB.XYZ.BasisZ;
+            }
+
+            var bubble = insertionPoint;
+            var free = insertionPoint + freeDir;
+
+            rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
+            rp.Name = $"SPK_{Guid.NewGuid():N}";
+            DebugLog(
+              $"[RVTIN] ReferencePlane created: yawRad={yawRad} isTop={instance["isTop"]} flipVertical={instance["flipVertical"]} faceUp={wantsFaceUp} faceDown={wantsFaceDown}"
+            );
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN] ReferencePlane creation failed: {ex.GetType().Name}: {ex.Message}");
+          }
         }
 
-        try
+        if (sp == null)
         {
-          // Detect face-tilt early: tilted screws need a horizontal ReferencePlane
-          // instead of the default vertical one.  Revit silently deletes WPB instances
-          // rotated out of their work plane, so the tilt MUST be in the plane itself.
-          bool wantsFaceUp = TryGetDynBool(instance, "faceUp", out var fUpP) && fUpP;
-          bool wantsFaceDown = TryGetDynBool(instance, "faceDown", out var fDnP) && fDnP;
-
-          XYZ freeDir, cut;
-          if (wantsFaceUp)
+          try
           {
-            // Horizontal plane: normal = cross(BasisY, -BasisX) = +Z → screw faces up
-            // freeDir=BasisY matches default screw plane orientation for correct in-plane heading
-            freeDir = DB.XYZ.BasisY;
-            cut = new XYZ(-1, 0, 0);
-            DebugLog("[RVTIN] faceUp: creating horizontal ReferencePlane (normal +Z)");
-          }
-          else if (wantsFaceDown)
-          {
-            // Horizontal plane: normal = cross(BasisY, BasisX) = -Z → screw faces down
-            freeDir = DB.XYZ.BasisY;
-            cut = DB.XYZ.BasisX;
-            DebugLog("[RVTIN] faceDown: creating horizontal ReferencePlane (normal -Z)");
-          }
-          else
-          {
-            // Clips encode rotation in the ReferencePlane direction (includes PI offset).
-            // Screws (no connectedElementId) use RotateElement instead — their 0/180
-            // yaw values produce equivalent planes via ReferencePlane encoding.
-            bool isConnection = instance["connectedElementId"] != null;
-            var adjustedYaw = isConnection ? (yawRad ?? 0.0) : 0.0;
-            var rotT = DB.Transform.CreateRotation(DB.XYZ.BasisZ, adjustedYaw);
-            freeDir = rotT.OfVector(DB.XYZ.BasisY);
-            cut = DB.XYZ.BasisZ;
-          }
-
-          var bubble = insertionPoint;
-          var free = insertionPoint + freeDir;
-
-          rp = Doc.Create.NewReferencePlane(bubble, free, cut, viewForRp ?? Doc.ActiveView);
-          rp.Name = $"SPK_{Guid.NewGuid():N}".Substring(0, 8);
-          DebugLog($"[RVTIN] ReferencePlane created: yawRad={yawRad} isTop={instance["isTop"]} flipVertical={instance["flipVertical"]} faceUp={wantsFaceUp} faceDown={wantsFaceDown}");
-        }
-        catch (Exception ex)
-        {
-          DebugLog($"[RVTIN] ReferencePlane creation failed: {ex.GetType().Name}: {ex.Message}");
-        }
-
-        try
-        {
 #if REVIT2019 || REVIT2020 || REVIT2021 || REVIT2022 || REVIT2023 || REVIT2024 || REVIT2025 || REVIT2026
-          sp = (rp != null)
-               ? DB.SketchPlane.Create(Doc, rp.Id)
-               : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
+            sp =
+              (rp != null)
+                ? DB.SketchPlane.Create(Doc, rp.Id)
+                : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
 #else
-        sp = (rp != null)
-             ? DB.SketchPlane.Create(Doc, rp)
-             : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
+            sp =
+              (rp != null)
+                ? DB.SketchPlane.Create(Doc, rp)
+                : DB.SketchPlane.Create(Doc, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisX, insertionPoint));
 #endif
-        }
-        catch (Exception ex)
-        {
-          DebugLog($"[RVTIN] SketchPlane creation failed: {ex.GetType().Name}: {ex.Message}");
+          }
+          catch (Exception ex)
+          {
+            DebugLog($"[RVTIN] SketchPlane creation failed: {ex.GetType().Name}: {ex.Message}");
+          }
         }
 
         if (sp != null)
@@ -1421,10 +1569,15 @@ public partial class ConverterRevit : ISpeckleConverter
           try
           {
             familyInstance = Doc.Create.NewFamilyInstance(
-              insertionPoint, familySymbol, sp, DB.Structure.StructuralType.NonStructural);
+              insertionPoint,
+              familySymbol,
+              sp,
+              DB.Structure.StructuralType.NonStructural
+            );
 
             var skParam = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM);
-            if (skParam != null && !skParam.IsReadOnly) skParam.Set(sp.Id);
+            if (skParam != null && !skParam.IsReadOnly)
+              skParam.Set(sp.Id);
           }
           catch (Exception ex)
           {
@@ -1434,10 +1587,16 @@ public partial class ConverterRevit : ISpeckleConverter
 
         if (familyInstance == null)
         {
+          screwPlaneHosted = false;
           try
           {
             familyInstance = Doc.Create.NewFamilyInstance(
-              insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+              insertionPoint,
+              familySymbol,
+              level,
+              DB.Structure.StructuralType.NonStructural
+            );
+            DebugLog("[RVTIN] Fallback level placement used (no work plane)");
           }
           catch (Exception ex)
           {
@@ -1451,34 +1610,45 @@ public partial class ConverterRevit : ISpeckleConverter
         {
           case DB.FamilyPlacementType.OneLevelBasedHosted when CurrentHostElement != null:
             familyInstance = Doc.Create.NewFamilyInstance(
-              insertionPoint, familySymbol, CurrentHostElement, level, DB.Structure.StructuralType.NonStructural);
+              insertionPoint,
+              familySymbol,
+              CurrentHostElement,
+              level,
+              DB.Structure.StructuralType.NonStructural
+            );
             break;
 
           case DB.FamilyPlacementType.WorkPlaneBased when CurrentHostElement != null:
+          {
+            var op = new DB.Options { ComputeReferences = true };
+            var geomElement = CurrentHostElement.get_Geometry(op);
+            if (geomElement == null)
             {
-              var op = new DB.Options { ComputeReferences = true };
-              var geomElement = CurrentHostElement.get_Geometry(op);
-              if (geomElement == null)
-              {
-                Doc.Regenerate();
-                geomElement = CurrentHostElement.get_Geometry(op);
-              }
-              if (geomElement == null) goto default;
-
-              DB.Reference faceRef = null;
-              var planeDist = double.MaxValue;
-              GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
-
-              familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new DB.XYZ(0, 0, 0), familySymbol);
-
-              var lvlParams = familyInstance.GetParameters("Schedule Level");
-              if (lvlParams?.Count > 0 && level != null) lvlParams[0].Set(level.Id);
-              break;
+              Doc.Regenerate();
+              geomElement = CurrentHostElement.get_Geometry(op);
             }
+            if (geomElement == null)
+              goto default;
+
+            DB.Reference faceRef = null;
+            var planeDist = double.MaxValue;
+            GetReferencePlane(geomElement, insertionPoint, ref faceRef, ref planeDist);
+
+            familyInstance = Doc.Create.NewFamilyInstance(faceRef, insertionPoint, new DB.XYZ(0, 0, 0), familySymbol);
+
+            var lvlParams = familyInstance.GetParameters("Schedule Level");
+            if (lvlParams?.Count > 0 && level != null)
+              lvlParams[0].Set(level.Id);
+            break;
+          }
 
           default:
             familyInstance = Doc.Create.NewFamilyInstance(
-              insertionPoint, familySymbol, level, DB.Structure.StructuralType.NonStructural);
+              insertionPoint,
+              familySymbol,
+              level,
+              DB.Structure.StructuralType.NonStructural
+            );
             break;
         }
       }
@@ -1492,21 +1662,20 @@ public partial class ConverterRevit : ISpeckleConverter
 
     Doc.Regenerate();
 
-
-/*//    Tilt the clip vertically by 90° (axis lies in the work plane):
-
-TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
-
-
-    // Quarter - turn in plan(spin around Z):
-
-    TryRotate90(Doc, familyInstance, AxisKind.WorldZ, DebugLog);
-
-
-    //Roll 90° around the instance’s own “up”:
-
-    TryRotate90(Doc, familyInstance, AxisKind.InstanceZ, DebugLog);
-*/
+    /*//    Tilt the clip vertically by 90° (axis lies in the work plane):
+    
+    TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
+    
+    
+        // Quarter - turn in plan(spin around Z):
+    
+        TryRotate90(Doc, familyInstance, AxisKind.WorldZ, DebugLog);
+    
+    
+        //Roll 90° around the instance’s own “up”:
+    
+        TryRotate90(Doc, familyInstance, AxisKind.InstanceZ, DebugLog);
+    */
 
 
     var shouldFlip = WantsVerticalFlip(instance);
@@ -1515,36 +1684,52 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     if (shouldFlip && familyInstance?.Location is DB.LocationPoint lp)
     {
-      DebugLog($"[VFlip] PRE-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
+      DebugLog(
+        $"[VFlip] PRE-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}"
+      );
 
       using (var st = new DB.SubTransaction(Doc))
       {
         st.Start();
 
         bool rePin = false;
-        try { if (familyInstance.Pinned) { familyInstance.Pinned = false; rePin = true; } }
-        catch (Exception ex) { DebugLog($"[VFlip] Unpin failed: {ex.Message}"); }
+        try
+        {
+          if (familyInstance.Pinned)
+          {
+            familyInstance.Pinned = false;
+            rePin = true;
+          }
+        }
+        catch (Exception ex)
+        {
+          DebugLog($"[VFlip] Unpin failed: {ex.Message}");
+        }
 
         var plane = DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisZ, lp.Point);
 
         try
         {
-          DB.ElementTransformUtils.MirrorElements(
-            Doc,
-            new List<DB.ElementId> { familyInstance.Id },
-            plane,
-            false
-          );
+          DB.ElementTransformUtils.MirrorElements(Doc, new List<DB.ElementId> { familyInstance.Id }, plane, false);
           vflipApplied = true;
-          DebugLog($"[VFlip] POST-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
+          DebugLog(
+            $"[VFlip] POST-mirror: Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}"
+          );
         }
         catch (Exception ex)
         {
           DebugLog($"[VFlip] MirrorElements failed: {ex.GetType().Name}: {ex.Message}");
         }
 
-        try { if (rePin) familyInstance.Pinned = true; }
-        catch (Exception ex) { DebugLog($"[VFlip] Re-pin failed: {ex.Message}"); }
+        try
+        {
+          if (rePin)
+            familyInstance.Pinned = true;
+        }
+        catch (Exception ex)
+        {
+          DebugLog($"[VFlip] Re-pin failed: {ex.Message}");
+        }
 
         st.Commit();
       }
@@ -1552,14 +1737,15 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     // Face tilt for screws: tilt is now encoded in the ReferencePlane (created above).
     // No RotateElement needed — Revit silently deletes WPB instances rotated out of plane.
-    bool faceTilted = (TryGetDynBool(instance, "faceUp", out var fUp) && fUp)
-                    || (TryGetDynBool(instance, "faceDown", out var fDown) && fDown);
+    bool faceTilted =
+      (TryGetDynBool(instance, "faceUp", out var fUp) && fUp)
+      || (TryGetDynBool(instance, "faceDown", out var fDown) && fDown);
 
     // Clips: rotation handled by ReferencePlane direction (skip RotateElement).
-    // Screws & non-WPB: rotation handled by RotateElement.
+    // Screws on a geometric plane: yaw encoded in the plane basis (skip).
     // Face-tilted screws: yaw is irrelevant (rotating a circle), skip.
-    bool skipRotateElement = (isWorkPlaneBased && instance["connectedElementId"] != null)
-                           || faceTilted;
+    bool skipRotateElement =
+      (isWorkPlaneBased && instance["connectedElementId"] != null) || faceTilted || screwPlaneHosted;
     if (!skipRotateElement)
     {
       if (yawRad.HasValue && Math.Abs(yawRad.Value) > 1e-9 && familyInstance.Location is DB.LocationPoint lpt)
@@ -1576,23 +1762,60 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       }
     }
 
+    // Level-hosted screws can't take tilt from a work plane — rotate ±90° about a
+    // horizontal axis instead (legal for level-hosted instances, unlike WPB ones).
+    if (screwLevelHosted && faceTilted && familyInstance.Location is DB.LocationPoint tiltLp)
+    {
+      bool tiltUp = TryGetDynBool(instance, "faceUp", out var fUpT) && fUpT;
+      // Family is authored with its driving axis along X — rotating about X just spins
+      // the screw in place. About Y: +90 sends +X to -Z (down), -90 to +Z (up).
+      var tiltAxis = DB.Line.CreateUnbound(tiltLp.Point, DB.XYZ.BasisY);
+      double tiltAngle = tiltUp ? -Math.PI / 2 : Math.PI / 2;
+      try
+      {
+        DB.ElementTransformUtils.RotateElement(Doc, familyInstance.Id, tiltAxis, tiltAngle);
+        DebugLog($"[RVTIN][SCREW] tilt {(tiltUp ? "-" : "+")}90deg about BasisY at {tiltLp.Point}");
+      }
+      catch (Exception ex)
+      {
+        DebugLog($"[RVTIN][SCREW] tilt failed: {ex.GetType().Name}: {ex.Message}");
+      }
+    }
+
     // Hand / Facing / standard mirror — SKIP if we just applied VFlip via MirrorElements,
     // because the mirror changes flip/mirror state and the correction would undo it.
-    if (!vflipApplied)
+    // Also SKIP for hostless screws: their flags are captured from the prefab's source
+    // instance and replaying them flips the screw across its work plane.
+    if (hostlessWpb)
     {
-      if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped) familyInstance.flipHand();
-      if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped) familyInstance.flipFacing();
+      DebugLog(
+        $"[RVTIN][SCREW] Skipping hand/facing/mirror correction (payload flags hand:{instance.handFlipped} facing:{instance.facingFlipped} mirrored:{instance.mirrored})"
+      );
+    }
+    else if (!vflipApplied)
+    {
+      if (familyInstance.CanFlipHand && instance.handFlipped != familyInstance.HandFlipped)
+        familyInstance.flipHand();
+      if (familyInstance.CanFlipFacing && instance.facingFlipped != familyInstance.FacingFlipped)
+        familyInstance.flipFacing();
       if (instance.mirrored != familyInstance.Mirrored)
       {
         DB.Group group = null;
-        try { group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null; }
+        try
+        {
+          group = CurrentHostElement != null ? Doc.Create.NewGroup(new[] { familyInstance.Id }) : null;
+        }
         catch (Autodesk.Revit.Exceptions.InvalidOperationException) { }
 
         var toMirror = group != null ? new[] { group.Id } : new[] { familyInstance.Id };
         try
         {
           DB.ElementTransformUtils.MirrorElements(
-            Doc, toMirror, DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisY, insertionPoint), false);
+            Doc,
+            toMirror,
+            DB.Plane.CreateByNormalAndOrigin(DB.XYZ.BasisY, insertionPoint),
+            false
+          );
         }
         catch (Autodesk.Revit.Exceptions.ApplicationException e)
         {
@@ -1603,25 +1826,33 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     }
     else
     {
-      DebugLog($"[RVTIN] Skipping hand/facing/mirror correction (VFlip applied). Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}");
+      DebugLog(
+        $"[RVTIN] Skipping hand/facing/mirror correction (VFlip applied). Hand={familyInstance.HandFlipped} Facing={familyInstance.FacingFlipped} Mirrored={familyInstance.Mirrored}"
+      );
     }
 
     // diagnostics
     var hostId = familyInstance.Host?.Id.GetIntegerValue();
     var skPlaneId = familyInstance.get_Parameter(DB.BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
-    var skPlaneStr = (skPlaneId != null && skPlaneId.GetIntegerValue() > 0) ? $"{skPlaneId.GetIntegerValue()}" : "<none>";
-    var planeName = skPlaneId != null && skPlaneId.GetIntegerValue() > 0
-                      ? (Doc.GetElement(skPlaneId) as DB.SketchPlane)?.Name
-                      : "<none>";
+    var skPlaneStr =
+      (skPlaneId != null && skPlaneId.GetIntegerValue() > 0) ? $"{skPlaneId.GetIntegerValue()}" : "<none>";
+    var planeName =
+      skPlaneId != null && skPlaneId.GetIntegerValue() > 0
+        ? (Doc.GetElement(skPlaneId) as DB.SketchPlane)?.Name
+        : "<none>";
     if (familyInstance.Location is DB.LocationPoint finalLp)
       DebugLog($"[RVTIN] Final location INTERNAL: {finalLp.Point}");
-    DebugLog($"[RVTIN] Final: host:{(hostId.HasValue ? hostId.ToString() : "<null>")} SKETCH_PLANE_PARAM:{skPlaneStr} name:{planeName}");
+    DebugLog(
+      $"[RVTIN] Final: host:{(hostId.HasValue ? hostId.ToString() : "<null>")} SKETCH_PLANE_PARAM:{skPlaneStr} name:{planeName}"
+    );
 
     SetInstanceParameters(familyInstance, instance);
 
     // INSTANCE_ELEVATION_PARAM is excluded by SetInstanceParameters' ParametersMap
     // IsReadOnly filter for WorkPlaneBased instances. Set it directly.
-    if (isWorkPlaneBased)
+    // Not for plane-hosted screws: their plane passes through the exact point, and
+    // elevation/offset params act as offset-from-plane there.
+    if (isWorkPlaneBased && !screwPlaneHosted)
     {
       var spParams = instance["parameters"] as Base;
       var elevSp = spParams?["INSTANCE_ELEVATION_PARAM"] as Objects.BuiltElements.Revit.Parameter;
@@ -1635,7 +1866,44 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
         }
         else
         {
-          DebugLog($"[RVTIN] INSTANCE_ELEVATION_PARAM not writable: exists={elevParam != null} readOnly={elevParam?.IsReadOnly}");
+          DebugLog(
+            $"[RVTIN] INSTANCE_ELEVATION_PARAM not writable: exists={elevParam != null} readOnly={elevParam?.IsReadOnly}"
+          );
+        }
+      }
+    }
+
+    if (screwPlaneHosted)
+    {
+      foreach (
+        var bip in new[] { BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM, BuiltInParameter.INSTANCE_ELEVATION_PARAM }
+      )
+      {
+        var offsetParam = familyInstance.get_Parameter(bip);
+        if (offsetParam != null && !offsetParam.IsReadOnly && Math.Abs(offsetParam.AsDouble()) > 1e-9)
+        {
+          DebugLog($"[RVTIN][SCREW] zeroing {bip} (was {offsetParam.AsDouble()})");
+          offsetParam.Set(0.0);
+        }
+      }
+    }
+
+    // Level-hosted screws: the level constraint snaps Z to the level at commit, so the
+    // height must live in Offset-from-Host. Runs after SetInstanceParameters so stale
+    // prefab-captured offsets can't win.
+    if (screwLevelHosted)
+    {
+      double offsetInternal = insertionPoint.Z - level.Elevation;
+      foreach (
+        var bip in new[] { BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM, BuiltInParameter.INSTANCE_ELEVATION_PARAM }
+      )
+      {
+        var offsetParam = familyInstance.get_Parameter(bip);
+        if (offsetParam != null && !offsetParam.IsReadOnly)
+        {
+          offsetParam.Set(offsetInternal);
+          DebugLog($"[RVTIN][SCREW] {bip} set to {offsetInternal} (internal units)");
+          break;
         }
       }
     }
@@ -1645,32 +1913,36 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     return appObj;
   }
 
-
-
-
-
-
-
-
-
-
-
   private static bool TryGetDynBool(Base b, string key, out bool value)
   {
     value = false;
-    if (b == null) return false;
+    if (b == null)
+      return false;
     if (!b.GetMembers(Speckle.Core.Models.DynamicBaseMemberType.All).TryGetValue(key, out var raw) || raw == null)
       return false;
 
     switch (raw)
     {
-      case bool bb: value = bb; return true;
-      case string s when bool.TryParse(s, out var bv): value = bv; return true;
-      case string s2 when int.TryParse(s2, out var iv): value = iv != 0; return true;
-      case int i: value = i != 0; return true;
-      case long l: value = l != 0; return true;
-      case double d: value = Math.Abs(d) > 1e-9; return true;
-      default: return false;
+      case bool bb:
+        value = bb;
+        return true;
+      case string s when bool.TryParse(s, out var bv):
+        value = bv;
+        return true;
+      case string s2 when int.TryParse(s2, out var iv):
+        value = iv != 0;
+        return true;
+      case int i:
+        value = i != 0;
+        return true;
+      case long l:
+        value = l != 0;
+        return true;
+      case double d:
+        value = Math.Abs(d) > 1e-9;
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -1678,7 +1950,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
   /// Works even if your Speckle.Objects in Revit doesn’t have the new property.
   private static bool WantsVerticalFlip(Base b)
   {
-    bool typed = false, hasTyped = false;
+    bool typed = false,
+      hasTyped = false;
     if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance rwpi)
     {
       // If your local kit defines the property, this compiles and returns the value.
@@ -1693,37 +1966,54 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     // Fall back to typed (or false if not present).
     return hasTyped && typed;
   }
+
   private enum AxisKind
   {
-    WorldZ,     // yaw in plan
-    WorldX,     // tilt around world X
-    WorldY,     // tilt around world Y
-    InPlaneX,   // axis = work-plane XVec (good for vertical tilt)
-    InPlaneY,   // axis = work-plane YVec (good for vertical tilt)
-    InstanceZ   // axis = fi local BasisZ (roll around its up)
+    WorldZ, // yaw in plan
+    WorldX, // tilt around world X
+    WorldY, // tilt around world Y
+    InPlaneX, // axis = work-plane XVec (good for vertical tilt)
+    InPlaneY, // axis = work-plane YVec (good for vertical tilt)
+    InstanceZ // axis = fi local BasisZ (roll around its up)
   }
 
-  private bool TryRotate90(Document doc, DB.FamilyInstance fi, AxisKind axisKind, Action<string> log)
-    => TryRotateAngle(doc, fi, axisKind, Math.PI / 2.0, log);
+  private bool TryRotate90(Document doc, DB.FamilyInstance fi, AxisKind axisKind, Action<string> log) =>
+    TryRotateAngle(doc, fi, axisKind, Math.PI / 2.0, log);
 
-  private bool TryRotateAngle(Document doc, DB.FamilyInstance fi, AxisKind axisKind, double angleRad, Action<string> log)
+  private bool TryRotateAngle(
+    Document doc,
+    DB.FamilyInstance fi,
+    AxisKind axisKind,
+    double angleRad,
+    Action<string> log
+  )
   {
-    if (fi == null) return false;
+    if (fi == null)
+      return false;
 
     // pivot: insertion point if we have one, else element center
-    XYZ pivot = (fi.Location is DB.LocationPoint lp) ? lp.Point :
-                ((fi.get_BoundingBox(null) is BoundingBoxXYZ bb) ? (bb.Min + bb.Max) * 0.5 : XYZ.Zero);
+    XYZ pivot =
+      (fi.Location is DB.LocationPoint lp)
+        ? lp.Point
+        : ((fi.get_BoundingBox(null) is BoundingBoxXYZ bb) ? (bb.Min + bb.Max) * 0.5 : XYZ.Zero);
 
     // resolve axis direction
     XYZ axisDir;
     switch (axisKind)
     {
-      case AxisKind.WorldZ: axisDir = DB.XYZ.BasisZ; break;
-      case AxisKind.WorldX: axisDir = DB.XYZ.BasisX; break;
-      case AxisKind.WorldY: axisDir = DB.XYZ.BasisY; break;
+      case AxisKind.WorldZ:
+        axisDir = DB.XYZ.BasisZ;
+        break;
+      case AxisKind.WorldX:
+        axisDir = DB.XYZ.BasisX;
+        break;
+      case AxisKind.WorldY:
+        axisDir = DB.XYZ.BasisY;
+        break;
       case AxisKind.InstanceZ:
         axisDir = fi.GetTotalTransform().BasisZ;
-        if (axisDir == null || axisDir.IsZeroLength()) axisDir = DB.XYZ.BasisZ;
+        if (axisDir == null || axisDir.IsZeroLength())
+          axisDir = DB.XYZ.BasisZ;
         break;
       case AxisKind.InPlaneX:
       case AxisKind.InPlaneY:
@@ -1743,7 +2033,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
             var t = fi.GetTotalTransform();
             axisDir = (axisKind == AxisKind.InPlaneX ? t.BasisX : t.BasisY);
           }
-          if (axisDir == null || axisDir.IsZeroLength()) axisDir = DB.XYZ.BasisX;
+          if (axisDir == null || axisDir.IsZeroLength())
+            axisDir = DB.XYZ.BasisX;
         }
         break;
     }
@@ -1754,8 +2045,18 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     // unpin if needed
     bool rePin = false;
-    try { if (fi.Pinned) { fi.Pinned = false; rePin = true; } }
-    catch (Exception ex) { log($"[R90] Unpin failed: {ex.Message}"); }
+    try
+    {
+      if (fi.Pinned)
+      {
+        fi.Pinned = false;
+        rePin = true;
+      }
+    }
+    catch (Exception ex)
+    {
+      log($"[R90] Unpin failed: {ex.Message}");
+    }
 
     try
     {
@@ -1766,7 +2067,12 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     catch (Exception ex)
     {
       log($"[R90] RotateElement failed: {ex.GetType().Name}: {ex.Message}");
-      try { if (rePin) fi.Pinned = true; } catch { }
+      try
+      {
+        if (rePin)
+          fi.Pinned = true;
+      }
+      catch { }
       st.RollBack();
       return false;
     }
@@ -1780,18 +2086,28 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
         DB.InstanceVoidCutUtils.AddInstanceVoidCut(doc, host, fi);
         log("[R90] AddInstanceVoidCut attempted.");
       }
-      else log("[R90] No host to cut.");
+      else
+        log("[R90] No host to cut.");
     }
-    catch (Exception ex) { log($"[R90] AddInstanceVoidCut failed: {ex.Message}"); }
+    catch (Exception ex)
+    {
+      log($"[R90] AddInstanceVoidCut failed: {ex.Message}");
+    }
 
     // re-pin
-    try { if (rePin) fi.Pinned = true; }
-    catch (Exception ex) { log($"[R90] Re-pin failed: {ex.Message}"); }
+    try
+    {
+      if (rePin)
+        fi.Pinned = true;
+    }
+    catch (Exception ex)
+    {
+      log($"[R90] Re-pin failed: {ex.Message}");
+    }
 
     st.Commit();
     return true;
   }
-
 
   private void RotateAsVerticalFlip(DB.FamilyInstance fi, XYZ pivot, bool usePlaneX = true)
   {
@@ -1816,7 +2132,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     }
 
     // Final fallback: world X
-    if (dir == null || dir.IsZeroLength()) dir = DB.XYZ.BasisX;
+    if (dir == null || dir.IsZeroLength())
+      dir = DB.XYZ.BasisX;
 
     var axis = DB.Line.CreateUnbound(pivot, dir.Normalize());
 
@@ -1827,9 +2144,6 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       st.Commit();
     }
   }
-
-
-
 
   // old
   /*
@@ -2175,66 +2489,16 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       : units;
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   // Find a FamilySymbol by family & type name (case-insensitive).
   private FamilySymbol FindFamilySymbolByName(string family, string type)
   {
     return new FilteredElementCollector(Doc)
-      .OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
+      .OfClass(typeof(FamilySymbol))
+      .Cast<FamilySymbol>()
       .FirstOrDefault(fs =>
-        fs.Family?.Name?.Equals(family, StringComparison.OrdinalIgnoreCase) == true &&
-        fs.Name?.Equals(type, StringComparison.OrdinalIgnoreCase) == true);
+        fs.Family?.Name?.Equals(family, StringComparison.OrdinalIgnoreCase) == true
+        && fs.Name?.Equals(type, StringComparison.OrdinalIgnoreCase) == true
+      );
   }
 
   // Try by UID, otherwise first level by elevation.
@@ -2243,11 +2507,13 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     if (!string.IsNullOrWhiteSpace(levelUniqueId))
     {
       var byUid = Doc.GetElement(levelUniqueId) as Level;
-      if (byUid != null) return byUid;
+      if (byUid != null)
+        return byUid;
     }
 
     return new FilteredElementCollector(Doc)
-      .OfClass(typeof(Level)).Cast<Level>()
+      .OfClass(typeof(Level))
+      .Cast<Level>()
       .OrderBy(l => l.Elevation)
       .FirstOrDefault();
   }
@@ -2256,11 +2522,10 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
   private Level CreateLevelIfNone()
   {
     var any = new FilteredElementCollector(Doc).OfClass(typeof(Level)).FirstElement() as Level;
-    if (any != null) return any;
+    if (any != null)
+      return any;
     return Level.Create(Doc, 0.0);
   }
-
-
 
   private string NormalizeUnits(string units)
   {
@@ -2268,26 +2533,6 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       ? ModelUnits
       : units;
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   public List<Base> ConvertToSpeckle(List<object> objects) => objects.Select(ConvertToSpeckle).ToList();
 
@@ -2298,7 +2543,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     static bool IsDeferred(Base b)
     {
-      if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance) return true;
+      if (b is Objects.BuiltElements.Revit.RevitWorkPlaneFamilyInstance)
+        return true;
 
       // Handle @SpeckleSchema wrapper
       var schema = b?["@SpeckleSchema"] as Base;
@@ -2310,9 +2556,12 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     foreach (var b in objects)
     {
-      if (b == null) continue;
-      if (IsDeferred(b)) deferred.Add(b);
-      else immediate.Add(b);
+      if (b == null)
+        continue;
+      if (IsDeferred(b))
+        deferred.Add(b);
+      else
+        immediate.Add(b);
     }
 
     var results = new List<object>(objects.Count);
@@ -2323,7 +2572,6 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
     return results;
   }
-
 
   /// Rotate 180° around an in-plane axis through the given pivot point.
   private static void RotateInstance180InPlane(Document doc, DB.FamilyInstance fi, XYZ pivot, bool usePlaneX = true)
@@ -2338,6 +2586,7 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
       st.Commit();
     }
   }
+
   private static SketchPlane TryGetSketchPlane(DB.FamilyInstance fi)
   {
     var id = fi.get_Parameter(BuiltInParameter.SKETCH_PLANE_PARAM)?.AsElementId();
@@ -2351,7 +2600,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
     {
       var pl = sp.GetPlane();
       var d = usePlaneX ? pl.XVec : pl.YVec;
-      if (d != null && !d.IsZeroLength()) return d.Normalize();
+      if (d != null && !d.IsZeroLength())
+        return d.Normalize();
     }
     var t = fi.GetTotalTransform();
     var alt = usePlaneX ? t.BasisX : t.BasisY;
@@ -2360,7 +2610,8 @@ TryRotate90(Doc, familyInstance, AxisKind.InPlaneX, DebugLog); // or InPlaneY
 
   private static void VerticalFlipSimple(Document doc, DB.FamilyInstance fi, bool usePlaneX = true)
   {
-    if (fi?.Location is not LocationPoint lp) return;
+    if (fi?.Location is not LocationPoint lp)
+      return;
 
     // cache an editable offset param (work-plane based uses FREE_HOST_OFFSET, others use ELEVATION)
     DB.Parameter target = fi.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM);

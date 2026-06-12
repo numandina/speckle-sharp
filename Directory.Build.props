@@ -106,8 +106,8 @@
 
   <PropertyGroup Label="Package Config">
     <!-- Version info — BUMP ON EVERY CHANGE. See CLAUDE.md § "Version Bump". -->
-    <Version Condition="$(Version) == ''">2.6.0</Version>
-    <FileVersion Condition="$(FileVersion) == ''">2.6.0.0</FileVersion>
+    <Version Condition="$(Version) == ''">2.6.5</Version>
+    <FileVersion Condition="$(FileVersion) == ''">2.6.5.0</FileVersion>
     <AssemblyVersion Condition="$(AssemblyVersion) == ''">$(FileVersion)</AssemblyVersion>
     
     <!-- Package info -->
