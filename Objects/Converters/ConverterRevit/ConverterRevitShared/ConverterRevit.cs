@@ -1278,6 +1278,10 @@ public partial class ConverterRevit : ISpeckleConverter
       return appObj;
     }
 
+    var keynoteKey = (instance["keynote"] as string)?.Trim();
+    if (!string.IsNullOrEmpty(keynoteKey))
+      familySymbol = GetOrCreateKeynoteSymbol(familySymbol, keynoteKey);
+
     if (!familySymbol.IsActive)
       familySymbol.Activate();
 
@@ -2499,6 +2503,76 @@ public partial class ConverterRevit : ISpeckleConverter
         fs.Family?.Name?.Equals(family, StringComparison.OrdinalIgnoreCase) == true
         && fs.Name?.Equals(type, StringComparison.OrdinalIgnoreCase) == true
       );
+  }
+
+  private readonly Dictionary<string, FamilySymbol> keynoteSymbolCache = new();
+
+  // Keynote is a TYPE parameter, so the same clip with different keynote text needs
+  // one duplicated type per (base type, key) pair: "{type}_keynote{key}" with
+  // KEYNOTE_PARAM = raw key. Failures fall back to the base type — a keynote problem
+  // must not block clip placement.
+  private FamilySymbol GetOrCreateKeynoteSymbol(FamilySymbol baseSymbol, string keynoteKey)
+  {
+    try
+    {
+      // Revit rejects these characters in element/type names; the param value keeps
+      // the raw key since that is what must match the project's keynote table.
+      var nameSafeKey = new string(keynoteKey.Where(c => "\\:{}[]|;<>?`~\r\n".IndexOf(c) < 0).ToArray()).Trim();
+      if (nameSafeKey.Length == 0)
+      {
+        DebugLog(
+          $"[RVTIN][KEYNOTE] key '{keynoteKey}' has no name-safe characters — using base type '{baseSymbol.Name}'"
+        );
+        return baseSymbol;
+      }
+
+      var suffix = "_keynote" + nameSafeKey;
+      if (baseSymbol.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        return baseSymbol;
+
+      var cacheKey = baseSymbol.Id.GetIntegerValue() + "|" + keynoteKey;
+      if (keynoteSymbolCache.TryGetValue(cacheKey, out var cached) && cached.IsValidObject)
+        return cached;
+
+      var targetName = baseSymbol.Name + suffix;
+      var symbol = baseSymbol
+        .Family.GetFamilySymbolIds()
+        .Select(id => Doc.GetElement(id) as FamilySymbol)
+        .FirstOrDefault(fs => fs?.Name?.Equals(targetName, StringComparison.OrdinalIgnoreCase) == true);
+
+      if (symbol == null)
+      {
+        symbol = baseSymbol.Duplicate(targetName) as FamilySymbol;
+        DebugLog($"[RVTIN][KEYNOTE] duplicated type '{baseSymbol.Name}' -> '{targetName}'");
+      }
+
+      if (symbol == null)
+      {
+        DebugLog($"[RVTIN][KEYNOTE] duplicate of '{baseSymbol.Name}' returned null — using base type");
+        return baseSymbol;
+      }
+
+      var p = symbol.get_Parameter(BuiltInParameter.KEYNOTE_PARAM);
+      if (p != null && !p.IsReadOnly && p.AsString() != keynoteKey)
+      {
+        p.Set(keynoteKey);
+        DebugLog($"[RVTIN][KEYNOTE] set KEYNOTE_PARAM='{keynoteKey}' on '{targetName}'");
+      }
+      else if (p == null)
+      {
+        DebugLog($"[RVTIN][KEYNOTE] '{targetName}' has no KEYNOTE_PARAM — type renamed but keynote not set");
+      }
+
+      keynoteSymbolCache[cacheKey] = symbol;
+      return symbol;
+    }
+    catch (Exception ex)
+    {
+      DebugLog(
+        $"[RVTIN][KEYNOTE] failed for key '{keynoteKey}' on '{baseSymbol?.Name}': {ex.GetType().Name}: {ex.Message} — using base type"
+      );
+      return baseSymbol;
+    }
   }
 
   // Try by UID, otherwise first level by elevation.
