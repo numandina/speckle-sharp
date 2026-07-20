@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
-using RevitSharedResources.Helpers.Extensions;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using Speckle.Core.Models;
 using Column = Objects.BuiltElements.Column;
 using DB = Autodesk.Revit.DB;
@@ -35,6 +37,7 @@ public partial class ConverterRevit
     }
 
     var familySymbol = GetElementType<FamilySymbol>(speckleColumn, appObj, out bool isExactMatch);
+    familySymbol = ResolveAtrSymbolOverride(speckleColumn, familySymbol, appObj, ref isExactMatch);
     if (familySymbol == null)
     {
       appObj.Update(status: ApplicationObject.State.Failed);
@@ -317,5 +320,170 @@ public partial class ConverterRevit
     );
 
     return speckleColumn;
+  }
+
+  /// <summary>
+  /// CloudFab threaded-rod shear walls: rods and couplers arrive as RevitColumn with
+  /// generic geometry plus "rodDiameter" / "couplerBottomDia" / "couplerTopDia" /
+  /// "couplerTypeName" properties (inches). Their families are Generic Models, which the
+  /// category-filtered column type lookup can never see, so this searches the whole
+  /// document. Rods map to a type by its Diameter parameter (created if missing);
+  /// couplers map to a type by name (e.g. 0.375" TO 0.75" COUPLER).
+  /// </summary>
+  private FamilySymbol ResolveAtrSymbolOverride(
+    Column speckleColumn,
+    FamilySymbol resolved,
+    ApplicationObject appObj,
+    ref bool isExactMatch
+  )
+  {
+    double rodDiaInches = GetAtrDoubleProperty(speckleColumn, "rodDiameter");
+    double couplerBottom = GetAtrDoubleProperty(speckleColumn, "couplerBottomDia");
+    var couplerTypeName = speckleColumn["couplerTypeName"] as string;
+
+    if (rodDiaInches <= 0 && couplerBottom <= 0 && string.IsNullOrWhiteSpace(couplerTypeName))
+    {
+      return resolved;
+    }
+
+    var allSymbols = new FilteredElementCollector(Doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>().ToList();
+    var familyName = GetElementFamily(speckleColumn);
+
+    if (couplerBottom > 0 || !string.IsNullOrWhiteSpace(couplerTypeName))
+    {
+      if (string.IsNullOrWhiteSpace(couplerTypeName))
+      {
+        couplerTypeName = string.Format(
+          CultureInfo.InvariantCulture,
+          "{0:0.###}\" TO {1:0.###}\" COUPLER",
+          couplerBottom,
+          GetAtrDoubleProperty(speckleColumn, "couplerTopDia")
+        );
+      }
+
+      var couplerSymbol =
+        allSymbols.FirstOrDefault(s =>
+          AtrNameEquals(s.FamilyName, familyName) && AtrNameEquals(s.Name, couplerTypeName)
+        ) ?? allSymbols.FirstOrDefault(s => AtrNameEquals(s.Name, couplerTypeName));
+
+      if (couplerSymbol != null)
+      {
+        isExactMatch = true;
+        return ActivatedSymbol(couplerSymbol);
+      }
+
+      appObj.Update(
+        logItem: $"Coupler type '{couplerTypeName}' not found in project — rename the placed instance's type manually"
+      );
+      return resolved;
+    }
+
+    var rodFamilySymbols = allSymbols.Where(s => AtrNameEquals(s.FamilyName, familyName)).ToList();
+    if (rodFamilySymbols.Count == 0 && resolved != null)
+    {
+      rodFamilySymbols = allSymbols.Where(s => s.Family.Id == resolved.Family.Id).ToList();
+    }
+
+    const double toleranceInches = 1.0 / 32.0;
+    foreach (var symbol in rodFamilySymbols)
+    {
+      var dia = symbol.LookupParameter("Diameter");
+      if (
+        dia != null
+        && dia.StorageType == StorageType.Double
+        && Math.Abs(dia.AsDouble() * 12.0 - rodDiaInches) < toleranceInches
+      )
+      {
+        isExactMatch = true;
+        return ActivatedSymbol(symbol);
+      }
+    }
+
+    var template = rodFamilySymbols.FirstOrDefault(s =>
+    {
+      var dia = s.LookupParameter("Diameter");
+      return dia != null && !dia.IsReadOnly && dia.StorageType == StorageType.Double;
+    });
+
+    if (template != null)
+    {
+      var newTypeName = FormatAtrInchesFraction(rodDiaInches) + "\" ATR";
+      // a type with the target name but a different Diameter may already exist —
+      // Duplicate throws on the name collision, so fall through to a suffixed name
+      foreach (var candidate in new[] { newTypeName, newTypeName + " (CloudFab)" })
+      {
+        try
+        {
+          var duplicated = (FamilySymbol)template.Duplicate(candidate);
+          duplicated.LookupParameter("Diameter").Set(rodDiaInches / 12.0);
+          appObj.Update(logItem: $"Created rod type '{candidate}' with Diameter {rodDiaInches}\"");
+          isExactMatch = true;
+          return ActivatedSymbol(duplicated);
+        }
+        catch (Autodesk.Revit.Exceptions.ApplicationException) { }
+      }
+    }
+
+    appObj.Update(
+      logItem: $"No type with Diameter {rodDiaInches}\" found in family '{familyName ?? "Unknown"}' and none could be created"
+    );
+    return rodFamilySymbols.Count > 0 ? ActivatedSymbol(rodFamilySymbols[0]) : resolved;
+  }
+
+  private static FamilySymbol ActivatedSymbol(FamilySymbol symbol)
+  {
+    if (!symbol.IsActive)
+    {
+      symbol.Activate();
+    }
+    return symbol;
+  }
+
+  private static bool AtrNameEquals(string a, string b)
+  {
+    return !string.IsNullOrWhiteSpace(a)
+      && !string.IsNullOrWhiteSpace(b)
+      && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+  }
+
+  private static double GetAtrDoubleProperty(Base element, string key)
+  {
+    var value = element[key];
+    if (value == null)
+    {
+      return 0;
+    }
+    try
+    {
+      return Convert.ToDouble(value, CultureInfo.InvariantCulture);
+    }
+    catch (SystemException)
+    {
+      return 0;
+    }
+  }
+
+  private static string FormatAtrInchesFraction(double inches)
+  {
+    int whole = (int)Math.Floor(inches + 1e-9);
+    int sixteenths = (int)Math.Round((inches - whole) * 16.0);
+    if (sixteenths == 16)
+    {
+      whole++;
+      sixteenths = 0;
+    }
+    if (sixteenths == 0)
+    {
+      return whole.ToString(CultureInfo.InvariantCulture);
+    }
+    int numerator = sixteenths;
+    int denominator = 16;
+    while (numerator % 2 == 0)
+    {
+      numerator /= 2;
+      denominator /= 2;
+    }
+    var fraction = numerator + "/" + denominator;
+    return whole > 0 ? whole + " " + fraction : fraction;
   }
 }
