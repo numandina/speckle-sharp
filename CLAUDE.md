@@ -18,6 +18,7 @@ Fork of [speckle-sharp](https://github.com/specklesystems/speckle-sharp) (v2/leg
 
 4. **`Objects/Converters/ConverterRevit/ConverterRevitShared/FileLogger.cs`** (new) — Debug file logger writing to `%LOCALAPPDATA%\Speckle\Logs\Revit-WP\`.
 5. **`Objects/Converters/ConverterRevit/ConverterRevitShared/ConverterRevitShared.projitems`** — Added FileLogger.cs to shared project.
+6. **`Objects/Converters/ConverterRevit/ConverterRevitShared/PartialClasses/ConvertBeam.cs`** (modified) — `BeamToNative` always calls `DisallowJoinAtEnd` on both ends for near-vertical baselines (|normalized Z| > 0.9), regardless of the `disallow-join` user setting. Unity sends studs as `RevitBeam`/`RevitBrace` on vertical lines (see cloudfab-unity CLAUDE.md § "Studs as Structural Framing"); without this, Revit auto-joins them into the tracks.
 
 ## Version Bump (every change)
 

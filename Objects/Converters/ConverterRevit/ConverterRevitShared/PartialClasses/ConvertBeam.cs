@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
-using RevitSharedResources.Helpers.Extensions;
 using Objects.BuiltElements;
 using Objects.BuiltElements.Revit;
+using RevitSharedResources.Helpers.Extensions;
 using Speckle.Core.Models;
 using DB = Autodesk.Revit.DB;
 
@@ -109,14 +109,22 @@ public partial class ConverterRevit
       // check for disallow join for beams in user settings
       // currently, this setting only applies to beams being created
 
-      if (Settings.ContainsKey("disallow-join") && !string.IsNullOrEmpty(Settings["disallow-join"]))
+      // Vertical studs from Unity arrive as framing on a vertical line; Revit's auto-join at
+      // the track intersections mangles their geometry, so joins are always disallowed for
+      // near-vertical members regardless of the user setting.
+      var lineDir = (baseLine.GetEndPoint(1) - baseLine.GetEndPoint(0)).Normalize();
+      bool disallowJoin = System.Math.Abs(lineDir.Z) > 0.9;
+
+      if (!disallowJoin && Settings.ContainsKey("disallow-join") && !string.IsNullOrEmpty(Settings["disallow-join"]))
       {
         List<string> joinSettings = new(Regex.Split(Settings["disallow-join"], @"\,\ "));
-        if (joinSettings.Contains(StructuralFraming))
-        {
-          StructuralFramingUtils.DisallowJoinAtEnd(revitBeam, 0);
-          StructuralFramingUtils.DisallowJoinAtEnd(revitBeam, 1);
-        }
+        disallowJoin = joinSettings.Contains(StructuralFraming);
+      }
+
+      if (disallowJoin)
+      {
+        StructuralFramingUtils.DisallowJoinAtEnd(revitBeam, 0);
+        StructuralFramingUtils.DisallowJoinAtEnd(revitBeam, 1);
       }
     }
 
